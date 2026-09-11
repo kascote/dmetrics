@@ -6,6 +6,7 @@ analyzer:
     # Some are deliberately invalid to exercise partial-parse behavior.
     - test/fixtures/**
     - test/harness/fixtures/**
+    - test/probe/fixtures/**
   language:
     strict-casts: true
     strict-inference: true

@@ -31,6 +31,10 @@ abstract class Metric {
   /// change this metric's output.
   Set<ScopeKind> get measures;
 
+  /// Fires once per run before the first file. Metrics read their run-global
+  /// knobs from `ctx.config.run.settings` here.
+  void onStartRun(RunContext ctx) {}
+
   void onEnterScope(ScopeContext ctx);
 
   Measurement onExitScope(ScopeContext ctx);

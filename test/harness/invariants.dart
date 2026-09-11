@@ -3,7 +3,8 @@ import 'package:metra/metra.dart';
 /// Per-metric invariants the harness asserts on every result (SPEC §6.1, §6.3).
 class ResultInvariants {
   /// Score of an empty scope: `measured == base + Σ contributors.increment`.
-  final num base;
+  /// Null skips the check for metrics whose value is not a sum (e.g. max).
+  final num? base;
 
   /// Expected aggregated value under `include_in_parent`, given the parent's
   /// own measured value and the direct children's aggregated values.
@@ -51,13 +52,15 @@ List<String> checkResultInvariants({
     );
   }
 
-  final sum = m.contributors.fold<num>(0, (acc, c) => acc + c.increment);
-  if (m.value != invariants.base + sum) {
-    out.add(
-      '$where: measured=${m.value} but base ${invariants.base} + '
-      'Σ contributors $sum = ${invariants.base + sum} '
-      '(${m.contributorSummary})',
-    );
+  final base = invariants.base;
+  if (base != null) {
+    final sum = m.contributors.fold<num>(0, (acc, c) => acc + c.increment);
+    if (m.value != base + sum) {
+      out.add(
+        '$where: measured=${m.value} but base $base + '
+        'Σ contributors $sum = ${base + sum} (${m.contributorSummary})',
+      );
+    }
   }
 
   final span = scope.scope.span;

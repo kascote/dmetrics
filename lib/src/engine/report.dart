@@ -1,6 +1,7 @@
 import 'package:source_span/source_span.dart' show FileSpan;
 
 import '../config/config.dart';
+import 'measurement.dart';
 import 'result.dart';
 import 'scope.dart';
 import 'source.dart';
@@ -68,5 +69,13 @@ class Report {
   final AnalysisConfig config;
   final List<FileReport> files;
 
-  const Report({required this.config, required this.files});
+  /// Run-level measurements emitted from `Metric.finish` (resolved metrics,
+  /// later). Not scoped to a file; reporters render them generically.
+  final List<Measurement> runMeasurements;
+
+  const Report({
+    required this.config,
+    required this.files,
+    this.runMeasurements = const [],
+  });
 }

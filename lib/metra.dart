@@ -6,6 +6,7 @@ library;
 
 export 'src/config/config.dart';
 export 'src/engine/analyze.dart';
+export 'src/engine/engine.dart';
 export 'src/engine/measurement.dart';
 export 'src/engine/metric.dart';
 export 'src/engine/report.dart';

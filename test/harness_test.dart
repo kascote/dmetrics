@@ -4,7 +4,6 @@ import 'package:test/test.dart';
 
 import 'harness/dummy_metrics.dart';
 import 'harness/harness.dart';
-import 'harness/stub_engine.dart';
 
 void main() {
   group('Fixture.parse', () {
@@ -94,12 +93,48 @@ void main() {
     });
   });
 
-  group('runFixture against the stub engine', () {
-    FixtureOutcome run(String source, {List<Metric>? metrics}) => runFixture(
+  group('runFixture against the engine', () {
+    FixtureOutcome run(
+      String source, {
+      List<Metric>? metrics,
+      Analyze engine = analyze,
+    }) => runFixture(
       Fixture.parse('t.dart', source),
-      analyze: stubAnalyze,
+      analyze: engine,
       metrics: metrics ?? [IfCountMetric()],
     );
+
+    // An engine that measures correctly but never rolls up.
+    Report noRollUp(List<SourceFile> s, List<Metric> m, AnalysisConfig c) {
+      final r = analyze(s, m, c);
+      return Report(
+        config: r.config,
+        files: [
+          for (final f in r.files)
+            FileReport(
+              source: f.source,
+              diagnostics: f.diagnostics,
+              scopes: [
+                for (final sc in f.scopes)
+                  ScopeResult(
+                    scope: sc.scope,
+                    results: {
+                      for (final e in sc.results.entries)
+                        e.key: MetricResult(
+                          measurement: e.value.measurement,
+                          value: e.value.measured,
+                          includes: const [],
+                          threshold: e.value.threshold,
+                          verdict: e.value.verdict,
+                          suppressed: e.value.suppressed,
+                        ),
+                    },
+                  ),
+              ],
+            ),
+        ],
+      );
+    }
 
     test('passes a correct fixture', () {
       final o = run('''
@@ -199,7 +234,7 @@ int f() => 0;
     test(
       'rolled= runs include_in_parent and catches a non-aggregating engine',
       () {
-        final o = run('''
+        final o = run(engine: noRollUp, '''
 // expect: ifcount=2 rolled=3
 void f(List<int> xs) {
   if (xs.isEmpty) return;
@@ -225,7 +260,7 @@ void f(List<int> xs) {
       AnalysisConfig? seen;
       Report spy(List<SourceFile> s, List<Metric> m, AnalysisConfig c) {
         seen = c;
-        return stubAnalyze(s, m, c);
+        return analyze(s, m, c);
       }
 
       final o = runFixture(
