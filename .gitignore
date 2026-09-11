@@ -3,3 +3,4 @@
 pubspec.lock
 build/
 doc/api/
+.claude/handoffs/
