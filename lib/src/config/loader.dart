@@ -386,8 +386,22 @@ ResolvedRun resolveRun({
     for (final m in metrics) ...m.settingDefaults,
   };
 
-  final values = <String, Object?>{...defaults};
-  for (final key in defaults.keys) {
+  final values = {...defaults};
+  _applyRootValues(values, roots, cli, problems);
+  _applyCliSet(values, defaults, cli, problems);
+
+  return ResolvedRun(_assemble(values, roots, cli), problems);
+}
+
+/// Precedence 3: values the roots state, which must agree with each other
+/// unless `--set` names the key.
+void _applyRootValues(
+  Map<String, Object?> values,
+  Map<String, LoadedConfig?> roots,
+  CliOverrides cli,
+  List<ConfigProblem> problems,
+) {
+  for (final key in values.keys.toList()) {
     // value → the sources that state it, for the conflict message.
     final stated = <Object?, List<String>>{};
     for (final r in roots.values) {
@@ -408,7 +422,15 @@ ResolvedRun resolveRun({
       values[key] = stated.keys.single;
     }
   }
+}
 
+/// Precedence 1: `--set key=value`, typed against the key's default.
+void _applyCliSet(
+  Map<String, Object?> values,
+  Map<String, Object?> defaults,
+  CliOverrides cli,
+  List<ConfigProblem> problems,
+) {
   for (final entry in cli.set.entries) {
     final key = entry.key;
     if (!defaults.containsKey(key)) {
@@ -432,12 +454,21 @@ ResolvedRun resolveRun({
       values[key] = parsed;
     }
   }
+}
 
+/// The final config: resolved run-global values split into the typed
+/// [RunConfig] fields and the metric settings map, plus every root's
+/// per-root config with `--threshold` forced on top.
+AnalysisConfig _assemble(
+  Map<String, Object?> values,
+  Map<String, LoadedConfig?> roots,
+  CliOverrides cli,
+) {
   final forced = {
     for (final e in cli.thresholds.entries)
       e.key: MetricConfig(threshold: e.value),
   };
-  final config = AnalysisConfig(
+  return AnalysisConfig(
     run: RunConfig(
       closureRollup: values[RunConfig.keyClosureRollup] as ClosureRollup,
       failOn: values[RunConfig.keyFailOn] as FailOn,
@@ -453,7 +484,6 @@ ResolvedRun resolveRun({
         e.key: (e.value?.root ?? RootConfig.defaults).copyWith(forced: forced),
     },
   );
-  return ResolvedRun(config, problems);
 }
 
 String _show(Object? v) => switch (v) {

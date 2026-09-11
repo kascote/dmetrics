@@ -1,7 +1,8 @@
 /// Console report: one line per finding in `dart analyze` style, then a
 /// summary. Only warn / fail / suppressed results and diagnostics print by
 /// default; [all] prints every scope. Metric-agnostic: `value` and verdict
-/// for any metric, contributor summary when there is one.
+/// for any metric, contributor summary and the table-shaped marker when
+/// there is one.
 library;
 
 import '../config/config.dart';
@@ -93,6 +94,7 @@ String _resultLine(
   }
   if (t != null) value += ' [warn ≥ ${t.warn}, fail ≥ ${t.fail}]';
   final summary = r.measurement.contributorSummary;
+  final table = r.measurement.tableShape;
   return [
     '${f.path}:${start.line + 1}:${start.column + 1}',
     tag,
@@ -100,6 +102,7 @@ String _resultLine(
     value,
     if (summary.isNotEmpty)
       summary.entries.map((e) => '${e.key} ×${e.value}').join(', '),
+    if (table != null) 'table-shaped: ${table.kind}',
   ].join(' • ');
 }
 

@@ -17,3 +17,8 @@ linter:
   rules:
     - prefer_final_locals
     - unawaited_futures
+
+metra:
+  metrics:
+    cyclomatic:
+      thresholds: { warn: 10, fail: 20 }

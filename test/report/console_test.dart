@@ -8,6 +8,17 @@ int low() => 0;
 // ignore: metra_cyclomatic
 int hidden(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 int high(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
+String name(int x) => switch (x) {
+  1 => 'one',
+  2 => 'two',
+  3 => 'three',
+  4 => 'four',
+  5 => 'five',
+  6 => 'six',
+  7 => 'seven',
+  8 => 'eight',
+  _ => 'many',
+};
 ''';
   const config = AnalysisConfig(
     roots: {
@@ -33,10 +44,11 @@ int high(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
     expect(lines, [
       'lib/a.dart:3:1 • suppressed (ignore) • function hidden • cyclomatic 3 [warn ≥ 2, fail ≥ 3] • ternary ×2',
       'lib/a.dart:4:1 • fail • function high • cyclomatic 3 [warn ≥ 2, fail ≥ 3] • ternary ×2',
-      '3 scopes in 1 file • 1 fail, 0 warn, 2 ok, 1 suppressed • status: violations',
+      'lib/a.dart:5:1 • fail • function name • cyclomatic 9 [warn ≥ 2, fail ≥ 3] • case ×8 • table-shaped: case',
+      '4 scopes in 1 file • 2 fail, 0 warn, 2 ok, 1 suppressed • status: violations',
     ]);
     final all = renderConsole(result, all: true).trimRight().split('\n');
-    expect(all, hasLength(4));
+    expect(all, hasLength(5));
     expect(
       all.first,
       'lib/a.dart:1:1 • ok • function low • cyclomatic 1 [warn ≥ 2, fail ≥ 3]',

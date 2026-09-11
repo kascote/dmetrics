@@ -195,6 +195,8 @@ Map<String, Object?> _contributors(Measurement m, ContributorDetail detail) {
       ],
     'contributorSummary': {for (final c in sorted) c.kind: 0}
       ..updateAll((kind, _) => sorted.where((c) => c.kind == kind).length),
+    if (m.tableShape case final t?)
+      'tableShaped': {'kind': t.kind, 'share': t.share},
   };
 }
 

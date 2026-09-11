@@ -80,6 +80,46 @@ void main() {
     expect(diffs, isEmpty, reason: diffs.join('\n'));
   });
 
+  test('tableShaped appears only when one kind dominates', () {
+    final r =
+        (((jsonReport(result)['files'] as List).single['scopes']
+                    as List)[0]['results']
+                as Map)['cyclomatic']
+            as Map;
+    expect(r.containsKey('tableShaped'), isFalse);
+
+    const table = SourceFile(
+      path: 'lib/t.dart',
+      content: '''
+String name(int x) => switch (x) {
+  1 => 'one',
+  2 => 'two',
+  3 => 'three',
+  4 => 'four',
+  5 => 'five',
+  6 => 'six',
+  7 => 'seven',
+  8 => 'eight',
+  _ => x > 9 ? 'many' : 'nine',
+};
+''',
+      configRoot: '.',
+    );
+    final json = jsonReport(
+      RunResult(
+        metrics: metrics,
+        config: config,
+        report: analyze([table], metrics, config),
+      ),
+    );
+    final t =
+        (((json['files'] as List).single['scopes'] as List)[0]['results']
+                as Map)['cyclomatic']
+            as Map;
+    expect(t['contributorSummary'], {'case': 8, 'ternary': 1});
+    expect(t['tableShaped'], {'kind': 'case', 'share': 8 / 9});
+  });
+
   test('--json-contributors=summary drops the list, keeps the summary', () {
     final json = jsonReport(result, contributors: ContributorDetail.summary);
     final r =

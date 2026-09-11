@@ -31,9 +31,50 @@ class Measurement {
     return out;
   }
 
+  /// The one contributor kind that supplies nearly the whole score, or null.
+  ///
+  /// A scope is table-shaped when a single kind accounts for at least
+  /// [TableShape.minShare] of the summed increments and the scope has at
+  /// least [TableShape.minIncrements] of increment in total: a `switch`
+  /// dispatch, a field-wise `==`, a `copyWith` of `??`s. Its score is the
+  /// size of a table, not the tangle of a control flow, which is a reading
+  /// hint for consumers, not a change in how anything is counted.
+  TableShape? get tableShape {
+    final byKind = <String, num>{};
+    num total = 0;
+    for (final c in contributors) {
+      byKind[c.kind] = (byKind[c.kind] ?? 0) + c.increment;
+      total += c.increment;
+    }
+    if (total < TableShape.minIncrements) return null;
+    for (final e in byKind.entries) {
+      final share = e.value / total;
+      if (share >= TableShape.minShare) {
+        return TableShape(kind: e.key, share: share);
+      }
+    }
+    return null;
+  }
+
   @override
   String toString() =>
       'Measurement($metricId, $scope, value=$value, contributors=$contributorSummary)';
+}
+
+/// See [Measurement.tableShape].
+class TableShape {
+  static const minShare = 0.8;
+  static const minIncrements = 8;
+
+  final String kind;
+
+  /// Fraction of the summed increments [kind] supplies, in `[minShare, 1]`.
+  final double share;
+
+  const TableShape({required this.kind, required this.share});
+
+  @override
+  String toString() => 'TableShape($kind, ${(share * 100).round()}%)';
 }
 
 /// One construct that produced part of a score.
