@@ -49,6 +49,7 @@ class Driver extends GeneralizingAstVisitor<void> {
       span: file.span(0, file.length),
       qualifiedName: path,
       partial: partial,
+      fingerprint: fingerprintOf(unit),
     );
     unit.accept(this);
   }
@@ -66,6 +67,7 @@ class Driver extends GeneralizingAstVisitor<void> {
         span: declarationSpan(file, node),
         qualifiedName: className,
         partial: partial,
+        fingerprint: fingerprintOf(node),
       );
       node.visitChildren(this);
       _ctx = saved;
@@ -125,6 +127,7 @@ class Driver extends GeneralizingAstVisitor<void> {
       span: declarationSpan(file, node),
       qualifiedName: qualifiedName,
       partial: partial,
+      fingerprint: fingerprintOf(node),
     );
   }
 

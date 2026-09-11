@@ -42,6 +42,12 @@ class CyclomaticMetric extends Metric {
   Set<ScopeKind> get measures => ScopeKind.measuredInV1;
 
   @override
+  Map<String, Object?> get settingDefaults => const {
+    knobNullCoalescing: true,
+    knobCaseArms: true,
+  };
+
+  @override
   void onStartRun(RunContext ctx) {
     final settings = ctx.config.run.settings;
     _countNullCoalescing = _bool(settings, knobNullCoalescing, true);

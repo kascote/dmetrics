@@ -75,6 +75,11 @@ class ScopeContext {
   /// True when the enclosing file had parse errors.
   final bool partial;
 
+  /// Short hash of the declaration's token stream, comments and whitespace
+  /// excluded. Deterministic; recorded as evidence for a future baseline
+  /// matcher (§7.3) and promised nothing more.
+  final String fingerprint;
+
   const ScopeContext({
     required this.id,
     required this.kind,
@@ -82,6 +87,7 @@ class ScopeContext {
     required this.span,
     required this.qualifiedName,
     required this.partial,
+    this.fingerprint = '',
   });
 
   /// The last segment of [qualifiedName].

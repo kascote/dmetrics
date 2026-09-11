@@ -7,6 +7,7 @@ analyzer:
     - test/fixtures/**
     - test/harness/fixtures/**
     - test/probe/fixtures/**
+    - test/golden/src/**
   language:
     strict-casts: true
     strict-inference: true

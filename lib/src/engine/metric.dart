@@ -31,6 +31,11 @@ abstract class Metric {
   /// change this metric's output.
   Set<ScopeKind> get measures;
 
+  /// Run-global knobs this metric reads, keyed `<id>.<knob>`, with their
+  /// documented defaults. The config loader validates values against the
+  /// default's type and reports every knob in the JSON `run` section.
+  Map<String, Object?> get settingDefaults => const {};
+
   /// Fires once per run before the first file. Metrics read their run-global
   /// knobs from `ctx.config.run.settings` here.
   void onStartRun(RunContext ctx) {}

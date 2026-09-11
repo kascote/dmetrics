@@ -50,9 +50,13 @@ FileReport _analyzeFile(
 ) {
   final parsed = parseSource(source);
   final root = config.root(source.configRoot);
+  final relative = pathRelativeToRoot(source.path, source.configRoot);
+  final effective = {
+    for (final m in metrics) m.id: root.metric(m.id, relativePath: relative),
+  };
   final active = [
     for (final m in metrics)
-      if (root.metric(m.id).enabled) m,
+      if (effective[m.id]!.isEnabled) m,
   ];
   final driver = Driver(
     file: parsed.file,
@@ -66,8 +70,9 @@ FileReport _analyzeFile(
     scopes: buildResults(
       measured: driver.measured,
       metrics: active,
-      root: root,
+      effective: effective,
       run: config.run,
+      suppressions: parsed.suppressions,
     ),
   );
 }

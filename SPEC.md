@@ -1,7 +1,9 @@
 # Dart Code Metrics Engine — High-Level Spec
 
-**Status:** Draft 0.5 · **Owner:** Nelson · **Date:** 2026-09-10
+**Status:** Draft 0.6 · **Owner:** Nelson · **Date:** 2026-09-11
 **Working name:** TBD (placeholder: `metra`)
+
+**Changes in 0.6 (M3 as built):** config file shape specified (§8); metrics declare their run-global knobs with defaults (`settingDefaults`) so the loader can type-check them and the JSON `run` block always lists every knob; `fingerprint` added to `ScopeContext`; JSON gains a top-level `diagnostics[]` for problems with no parsed file to hang off (config errors, unreadable files), `configs[].overrides` when non-empty, `detail` only when non-null; CLI gains `--threshold`, `--json-contributors`, `--all`; a missing `--config` file is a usage error; suppression placement pinned down (trailing on the first line, before metadata, outermost scope on the line only); no built-in thresholds — without config every verdict is `ok`; `yaml` and `path` added to the dependency list; §5.2 gains the `RunResult` type that wraps the engine report for reporters.
 
 **Changes in 0.5:** nested roll-up invariant corrected to use children's aggregated values (`value = measured + Σ(child.value − 1)`, cyclomatic-specific) with a three-level fixture; file identity made report-wide (run-root-relative) and separated from the config-root-relative path used for glob matching; deterministic collision fallback for duplicate named declarations in recovered source; JSON `parent` defined as the nearest enclosing scope emitted in the report; cyclomatic counting made explicitly independent of pipeline selection.
 
@@ -109,6 +111,13 @@ abstract class Metric {
   MetricRequirements get requirements;    // syntactic | resolved
   Set<ScopeKind> get measures;            // cyclomatic: the eight measured kinds above
 
+  // Run-global knobs this metric reads, keyed `<id>.<knob>`, with their
+  // documented defaults. The config loader rejects unknown knobs and values
+  // of the wrong type; the JSON `run` block lists every knob with its
+  // effective value. Read in onStartRun from `ctx.config.run.settings`.
+  Map<String, Object?> get settingDefaults;   // cyclomatic: the two §6.2 knobs
+  void onStartRun(RunContext ctx);
+
   // Scope lifecycle. The engine emits these ONLY for kinds in `measures`, so a
   // metric never sees a scope kind it did not opt into — adding `class_` or
   // `library` measurements later cannot change this metric's output.
@@ -138,6 +147,8 @@ class ScopeContext {
   final SourceSpan span;        // the whole declaration: metadata through body
   final String qualifiedName;   // display only: C.m / C.m.<closure#1> / C.field.<closure#1>
   final bool partial;           // true if the enclosing file had parse errors
+  final String fingerprint;     // 8 hex digits, FNV-1a over the declaration's token
+                                // lexemes (comments/whitespace excluded); see §7.3
 }
 
 /// What a metric produces for one scope.
@@ -230,7 +241,7 @@ The resolved pipeline is not implemented in v1, but these decisions are made _no
 
 ### 5.2 I/O seam
 
-`analyze()` takes `List<SourceFile>` and the resolved per-root `Config`s. Everything that touches the disk lives in `src/io/`: target expansion (files and directories, globs, excludes, `*.g.dart` and `*.freezed.dart` skipped by default), reading, and config-root lookup (§8). A convenience `analyzePaths(targets, …)` composes the two. Tests drive the engine with in-memory sources; the I/O layer has its own small tests.
+`analyze()` takes `List<SourceFile>` and the resolved per-root `Config`s. Everything that touches the disk lives in `src/io/`: target expansion (files and directories; dot-directories such as `.dart_tool` skipped; `**.g.dart` and `**.freezed.dart` excluded by default), reading, and config-root lookup (§8). A convenience `analyzePaths(targets, …)` composes the two and returns a `RunResult`: the engine `Report` (null when config problems aborted the run) plus run-level diagnostics that belong to no parsed file (config errors, unreadable files), from which status, exit code and summary derive (§7.2). Reporters consume `RunResult`, never the bare `Report`. Tests drive the engine with in-memory sources; the I/O layer has its own small tests on temp directories.
 
 ## 6. v1 counting rules (cyclomatic)
 
@@ -303,12 +314,16 @@ Three consumers, in priority order:
 ### 7.1 CLI shape
 
 ```
-metra analyze [<file>|<dir> ...] [--json] [--config <path>] [--fail-on warn|fail] [--set <key>=<value>]
+metra analyze [<file>|<dir> ...] [--json] [--json-contributors full|summary] [--all]
+              [--config <path>] [--fail-on warn|fail] [--set <key>=<value>]
+              [--threshold <metric>=warn:N,fail:M]
 ```
 
 - No targets: the current directory. Files and directories mix freely. A single-file target does no repo-wide discovery: it reads that file and looks up its config root (§8). Files that don't match the config's include/exclude are still analyzed when named explicitly (same as `dart analyze`).
-- `--json` writes the report in §7.3 to stdout; console output otherwise. Diagnostics and progress never go to stdout in JSON mode.
-- `--set cyclomatic.count_case_arms=false` overrides a run-global knob for the whole run (§8).
+- `--json` writes the report in §7.3 to stdout; console output otherwise. Diagnostics and progress never go to stdout in JSON mode; usage errors go to stderr.
+- Console output is `dart analyze`-shaped: one line per finding (`path:line:col • verdict • kind qualifiedName • metric value [warn ≥ w, fail ≥ f] • contributor summary`), only warn / fail / suppressed results and diagnostics by default, every scope with `--all`, then a one-line summary ending in the status.
+- `--set cyclomatic.count_case_arms=false` overrides a run-global knob for the whole run (§8); `--fail-on` is shorthand for `--set fail_on=…`. `--threshold cyclomatic=warn:8,fail:12` forces a metric's thresholds in every root, above `overrides`.
+- `--help` / `--version` as usual. A nonexistent target or `--config` file is a usage error (exit 3).
 
 ### 7.2 Invalid source and exit codes
 
@@ -321,7 +336,7 @@ Parsing uses error recovery (`throwIfDiagnostics: false`) and the latest languag
 | 2    | Analysis incomplete: parse errors, unreadable files, invalid config, conflicting knobs (§8) | `errors`      |
 | 3    | Usage error (bad flags, no such target)                                                    | —             |
 
-Exit 2 wins over exit 1. `errors` carries a `diagnostics[]` list per file (message, span, severity) so the agent can fix syntax first, then re-run. An empty target set (nothing matched) is exit 0 with zero files — reported explicitly in `summary`, never silent.
+Exit 2 wins over exit 1. Parse diagnostics are listed per file (`files[].diagnostics`: message, span, severity) and the file gets `status: "errors"`; problems with no parsed file to hang off — invalid config, conflicting knobs, unreadable files — go in the top-level `diagnostics[]` (message, severity, optional path/line/column). Either kind makes the run `errors`, so the agent can fix syntax or config first, then re-run. Config problems abort analysis (`files: []`) rather than measuring under a config the user did not ask for. `summary.filesWithErrors` counts files with parse errors; unreadable files never enter `files[]`. An empty target set (nothing matched) is exit 0 with zero files — reported explicitly in `summary`, never silent.
 
 ### 7.3 JSON report — specimen
 
@@ -358,6 +373,7 @@ The schema is the tool's real public interface; this specimen is a golden test. 
     "verdicts": { "ok": 1, "warn": 0, "fail": 1 },
     "suppressed": 0
   },
+  "diagnostics": [],
   "files": [
     {
       "path": "lib/src/parser.dart",
@@ -443,8 +459,10 @@ Contract notes:
 - **Suppressed results are still reported**, with `suppressed: { "kind": "ignore" | "ignore_for_file", "span": … }`, verdict forced to `ok`, and counted in `summary.suppressed`. Suppressions are visible, never silent.
 - **`measured` vs `value` vs `includes`.** Identical values and empty `includes` under `closure_rollup: separate`. Under `include_in_parent`, `value` is the aggregate, `includes` lists the child ids folded in, `verdict` applies to `value`, and the children appear as their own scopes with their own results.
 - **`parent` in JSON** is the id of the nearest enclosing scope **emitted in the report**, or `null`. Structural contexts (file, class) are not serialized, so a method's JSON `parent` is `null` even though its in-engine `ScopeContext.parent` is the class context. Reporters that need the class can read `qualifiedName`.
-- **`configs` vs `run`.** Per-root settings (thresholds, enablement, overrides) live in `configs[]`; each file names its `configRoot`. Run-global settings (counting knobs, roll-up policy, `fail_on`) live once in `run`.
+- **`configs` vs `run`.** Per-root settings (thresholds, enablement, overrides) live in `configs[]`; each file names its `configRoot`. `configs[].source` is the config file's run-root-relative path, or `null` for a defaults root; `configs[].overrides` (`[{ paths, metrics }]`) appears only when the root has any. Run-global settings (counting knobs, roll-up policy, `fail_on`) live once in `run`; every knob a metric declares in `settingDefaults` is listed with its effective value, config or not.
+- **Optional keys.** `detail` appears on a result only when the metric set it; `runMeasurements[]` (from `finish`) only when non-empty. Everything else in the specimen is always present, `null` where it does not apply. `summary.verdicts` counts results, not scopes, so it sums to `scopes` only in a single-metric run.
 - **`partial: true`** on a scope means the file had parse errors; the number is a best effort from a recovered AST.
+- **`fingerprint`** is FNV-1a (32-bit) over the declaration's token lexemes, NUL-separated, comments and whitespace excluded, as eight hex digits. Identifiers are not normalized in v1; a rename changes it.
 
 ## 8. Initial setup
 
@@ -467,7 +485,32 @@ metra/
   analysis_options.yaml
 ```
 
-**Dependencies:** `analyzer`, `args`, `glob`, `source_span`, `test`. Nothing else until it hurts.
+**Dependencies:** `analyzer`, `args`, `glob`, `path`, `source_span`, `yaml`, `test`. Nothing else until it hurts (`path` and `yaml` are already transitive via `analyzer`).
+
+**Config file.** The `metra:` section of `analysis_options.yaml`:
+
+```yaml
+metra:
+  fail_on: fail                        # run-global: warn | fail
+  closure_rollup: separate             # run-global: separate | include_in_parent
+  include: ['lib/**', 'bin/**']        # per-root discovery globs; default: every .dart file
+  exclude: ['**.g.dart']               # per-root; default: ['**.g.dart', '**.freezed.dart']
+  metrics:
+    cyclomatic:
+      enabled: true
+      thresholds: { warn: 8, fail: 12 }
+      count_case_arms: true            # run-global knob, declared by the metric (settingDefaults)
+      count_null_coalescing: true
+  overrides:                           # thresholds and enablement only; last match wins
+    - paths: ['test/**']
+      metrics:
+        cyclomatic: { thresholds: { warn: 15, fail: 25 } }
+    - paths: ['lib/src/generated/**']
+      metrics:
+        cyclomatic: { enabled: false }
+```
+
+Unknown keys, unknown metric ids, unknown or mistyped knobs, `warn > fail`, malformed YAML, and a run-global key inside `overrides` are all config errors (exit 2) with a file position. A bare `metra:` with nothing under it still makes its directory a root, with defaults. Built-in defaults are: every compiled-in metric enabled, **no thresholds** (every verdict `ok` until a threshold is configured or passed with `--threshold`), the default `exclude` list. A default threshold for cyclomatic is deliberately not built in yet; M4 decides with data.
 
 **Config roots.** Config is read from `analysis_options.yaml` under a `metra:` key. Each analyzed file's **config root** is the nearest ancestor directory containing an `analysis_options.yaml` with that key (or the package root if none has it, using built-in defaults). This lookup is per file and identical whether the file was named explicitly or discovered under a directory, so both paths yield the same measurement and the same policy. `--config <path>` forces a single root for the whole run. A monorepo run therefore naturally has several roots.
 
@@ -485,7 +528,9 @@ Precedence within a root, highest first:
 
 Globs match the file's path **relative to its config root** with `package:glob` semantics; the run-root-relative `path` used for identity and reporting is never what a glob sees, so a package's config matches the same files regardless of where the run was started. `overrides` may change **thresholds and enablement only**; a run-global key inside `overrides` is a config error (exit 2).
 
-**Suppressions.** `// ignore: metra_cyclomatic` on the line immediately before a scope's declaration, or on the declaration's first line; `// ignore_for_file: metra_cyclomatic` anywhere in the file. `// ignore: metra` suppresses all metrics for that scope. A suppression on a method does not suppress its closures. Suppressed results are reported as in §7.3. (Inline suppressions vs. agent-authored code is under review — see §9 — but ship as specced.)
+**Suppressions.** `// ignore: metra_cyclomatic` on the line immediately before a scope's declaration (the line before its metadata, if any; a doc comment in between breaks the adjacency), or as a trailing comment on the declaration's first line; `// ignore_for_file: metra_cyclomatic` anywhere in the file. `// ignore: metra` suppresses all metrics for that scope; other names in the same comment (`// ignore: unused_element, metra_cyclomatic`) are ignored, as the analyzer does. Comments are taken from the token stream, so text inside string literals never matches. A line ignore applies only to the **outermost** measured scopes starting on that line, so a suppression on a method does not suppress its closures, not even a closure on the method's first line; to suppress a closure, put the ignore on the closure's own line. Suppressed results are reported as in §7.3. (Inline suppressions vs. agent-authored code is under review — see §9 — but ship as specced.)
+
+**Golden.** `test/golden/report.json` is the rendering of `test/golden/src/lib/src/parser.dart` (a source built to reproduce the specimen's numbers: 13, six `case` arms, two `when`, three `if`, one `??`, one closure). The golden test also parses the §7.3 specimen straight out of this file and asserts that the rendered report has exactly its key structure, so editing the specimen without the reporter (or vice versa) fails the build. Regenerate with `UPDATE_GOLDENS=1 dart test test/report/json_golden_test.dart`.
 
 **Testing.** The annotated-fixture harness is the _first_ thing built. Each fixture scope carries `// expect: cyclomatic=N` (and `// expect: cyclomatic=N rolled=M` where roll-up differs, including a three-level method → closure → closure fixture asserting 2/3/4); the harness parses annotations, runs the engine over in-memory sources, asserts per scope, and checks the §6.1 and §6.3 invariants on every result. A fixture with an `// expect: partial` header asserts the invalid-source behavior. Engine tests include a display-name collision fixture (constructor `C.foo` next to method `foo`, getter/setter pair) asserting distinct ids, a recovered-source fixture with a duplicated method asserting the `#2` fallback, a two-package fixture with identical relative paths asserting distinct ids, and multi-root fixtures asserting per-root thresholds and the knob-conflict error. A small oracle script compares selected fixtures against Lizard for cross-validation of shared constructs.
 

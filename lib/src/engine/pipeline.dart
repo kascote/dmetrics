@@ -10,14 +10,16 @@ import 'metric.dart';
 import 'report.dart';
 import 'result.dart';
 import 'scope.dart';
+import 'suppress.dart';
 
 /// Turns raw measurements into [ScopeResult]s in report order (start offset,
 /// then end offset).
 List<ScopeResult> buildResults({
   required List<ScopeMeasurements> measured,
   required List<Metric> metrics,
-  required RootConfig root,
+  required Map<String, MetricConfig> effective,
   required RunConfig run,
+  Suppressions suppressions = Suppressions.none,
 }) {
   final ordered = [...measured]..sort(_byStartThenEnd);
   final results = {
@@ -30,18 +32,25 @@ List<ScopeResult> buildResults({
         if (m.measurements.containsKey(metric.id)) m,
     ];
     final aggregated = _aggregate(metric, scopes, run.closureRollup);
-    final threshold = root.metric(metric.id).threshold;
+    final threshold = effective[metric.id]?.threshold;
+    final forFile = suppressions.forFile(metric.id);
     for (final s in scopes) {
       final (value, includes) = aggregated[s.scope.id]!;
-      // Suppression detection lands with the I/O layer (M3); until then
-      // nothing is suppressed.
-      const Suppression? suppressed = null;
+      // A line ignore reaches only the outermost measured scopes starting on
+      // its line, so ignoring a method never ignores its closures.
+      final line = s.scope.span.start.line;
+      final outermost =
+          s.scope.nearestAncestor(metric.measures)?.span.start.line != line;
+      final suppressed =
+          forFile ?? (outermost ? suppressions.forLine(line, metric.id) : null);
       results[s.scope.id]![metric.id] = MetricResult(
         measurement: s.measurements[metric.id]!,
         value: value.value,
         includes: includes,
         threshold: threshold,
-        verdict: threshold?.evaluate(value.value) ?? Verdict.ok,
+        verdict: suppressed != null
+            ? Verdict.ok
+            : threshold?.evaluate(value.value) ?? Verdict.ok,
         suppressed: suppressed,
       );
     }

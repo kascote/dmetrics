@@ -3,6 +3,7 @@
 library;
 
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/token.dart';
 import 'package:source_span/source_span.dart' as ss;
 
 import 'scope.dart';
@@ -63,15 +64,40 @@ String declaredNameOf(AstNode node) => switch (node) {
   _ => throw ArgumentError('not a named scope node: ${node.runtimeType}'),
 };
 
+/// The first token of a declaration: metadata through body, doc comments
+/// excluded.
+Token declarationBeginToken(AstNode node) => switch (node) {
+  AnnotatedNode(:final metadata) when metadata.isNotEmpty =>
+    metadata.beginToken!,
+  AnnotatedNode() => node.firstTokenAfterCommentAndMetadata,
+  _ => node.beginToken,
+};
+
 /// The whole declaration, metadata through body. Doc comments are excluded.
-ss.FileSpan declarationSpan(ss.SourceFile file, AstNode node) {
-  final start = switch (node) {
-    AnnotatedNode(:final metadata) when metadata.isNotEmpty =>
-      metadata.beginToken!.offset,
-    AnnotatedNode() => node.firstTokenAfterCommentAndMetadata.offset,
-    _ => node.offset,
-  };
-  return file.span(start, node.end);
+ss.FileSpan declarationSpan(ss.SourceFile file, AstNode node) =>
+    file.span(declarationBeginToken(node).offset, node.end);
+
+/// FNV-1a (32-bit) over the declaration's token lexemes, NUL-separated, as
+/// eight hex digits. Comments and whitespace do not participate.
+String fingerprintOf(AstNode node) {
+  var hash = 0x811c9dc5;
+  void mix(int byte) {
+    hash = ((hash ^ byte) * 0x01000193) & 0xffffffff;
+  }
+
+  final end = node.end;
+  for (
+    Token? t = declarationBeginToken(node);
+    t != null && t.offset < end && t.type != TokenType.EOF;
+    t = t.next
+  ) {
+    for (final unit in t.lexeme.codeUnits) {
+      mix(unit & 0xff);
+      mix(unit >> 8);
+    }
+    mix(0);
+  }
+  return hash.toRadixString(16).padLeft(8, '0');
 }
 
 /// Allocates ids that are unique within one file's report (§7.3).

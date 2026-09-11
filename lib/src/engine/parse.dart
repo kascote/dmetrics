@@ -5,18 +5,21 @@ import 'package:source_span/source_span.dart' as ss;
 
 import 'report.dart';
 import 'source.dart';
+import 'suppress.dart';
 
 class ParsedSource {
   final SourceFile source;
   final CompilationUnit unit;
   final ss.SourceFile file;
   final List<Diagnostic> diagnostics;
+  final Suppressions suppressions;
 
   const ParsedSource({
     required this.source,
     required this.unit,
     required this.file,
     required this.diagnostics,
+    required this.suppressions,
   });
 
   bool get partial => diagnostics.any((d) => d.severity == Severity.error);
@@ -35,6 +38,7 @@ ParsedSource parseSource(SourceFile source) {
     source: source,
     unit: result.unit,
     file: file,
+    suppressions: Suppressions.scan(result.unit.beginToken, file),
     diagnostics: [
       for (final e in result.errors)
         Diagnostic(
