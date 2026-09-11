@@ -14,6 +14,7 @@ import 'package:analyzer/dart/ast/token.dart';
 
 import '../../engine/measurement.dart';
 import '../../engine/metric.dart';
+import '../../engine/result.dart';
 import '../../engine/scope.dart';
 
 class CyclomaticMetric extends Metric {
@@ -46,6 +47,11 @@ class CyclomaticMetric extends Metric {
     knobNullCoalescing: true,
     knobCaseArms: true,
   };
+
+  /// Decided at M4 with data: across eleven trial codebases `warn` at 10
+  /// sat near the 90th–95th percentile and `fail` at 20 was precise.
+  @override
+  Threshold? get defaultThreshold => const Threshold(warn: 10, fail: 20);
 
   @override
   void onStartRun(RunContext ctx) {

@@ -1,4 +1,4 @@
-/// Dart-native static code metrics engine (working name: metra).
+/// Dart-native static code metrics engine.
 ///
 /// Library-first: `analyze(sources, metrics, config)` is a pure API over
 /// in-memory sources; `analyzePaths(targets, …)` composes it with the I/O

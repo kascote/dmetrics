@@ -7,7 +7,7 @@ library;
 
 import 'dart:io';
 
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 import 'package:test/test.dart';
 
 import 'fixture.dart';

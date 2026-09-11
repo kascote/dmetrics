@@ -1,4 +1,4 @@
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 import 'package:test/test.dart';
 
 import 'recording_metric.dart';

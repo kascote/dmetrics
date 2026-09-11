@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:metra/src/cli/cli.dart';
+import 'package:dmetrics/src/cli/cli.dart';
 
 Future<void> main(List<String> args) async {
   final code = runCli(

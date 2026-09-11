@@ -1,4 +1,4 @@
-# metra
+# dmetrics
 
 A Dart-native static code metrics engine. It measures every function-shaped
 scope in your code (functions, methods, getters, setters, operators,
@@ -13,13 +13,13 @@ built so that more metrics register without touching it.
 
 ```sh
 # Analyze the current directory
-dart run bin/metra.dart analyze
+dart run bin/dmetrics.dart analyze
 
 # Analyze specific files or directories, print every scope (not only problems)
-dart run bin/metra.dart analyze lib/src/config --all
+dart run bin/dmetrics.dart analyze lib/src/config --all
 
 # JSON report to stdout
-dart run bin/metra.dart analyze lib --json
+dart run bin/dmetrics.dart analyze lib --json
 ```
 
 Without any configuration every scope reports `ok`: **there are no built-in
@@ -65,13 +65,13 @@ not ask for.
 
 ## Configuration
 
-Config lives under a `metra:` key in `analysis_options.yaml`, next to the
-analyzer's own settings. Everything is optional. A bare `metra:` with nothing
+Config lives under a `dmetrics:` key in `analysis_options.yaml`, next to the
+analyzer's own settings. Everything is optional. A bare `dmetrics:` with nothing
 under it is valid and just marks that directory as a config root with
 defaults.
 
 ```yaml
-metra:
+dmetrics:
   fail_on: fail # run-global: warn | fail
   closure_rollup: separate # run-global: separate | include_in_parent
   include: ["lib/**", "bin/**"] # per-root discovery globs; default: every .dart file
@@ -79,7 +79,7 @@ metra:
   metrics:
     cyclomatic:
       enabled: true
-      thresholds: { warn: 10, fail: 20 }
+      thresholds: { warn: 10, fail: 20 } # the built-in default; `none` turns them off
       count_case_arms: true # run-global knob
       count_null_coalescing: true # run-global knob
   overrides: # thresholds and enablement only; last match wins
@@ -99,7 +99,7 @@ metra:
 | `closure_rollup` | run-global | `separate`                         | How closures and local functions aggregate into their parent. See [Closure roll-up](#closure-roll-up). |
 | `include`        | per-root   | every `.dart` file                 | Globs selecting files when a directory is analyzed. Explicitly named files are always analyzed.        |
 | `exclude`        | per-root   | `['**.g.dart', '**.freezed.dart']` | Globs removed from discovery. Setting this replaces the default list.                                  |
-| `metrics`        | per-root   | all enabled, no thresholds         | Per-metric settings keyed by metric id. See below.                                                     |
+| `metrics`        | per-root   | all enabled, default thresholds    | Per-metric settings keyed by metric id. See below.                                                     |
 | `overrides`      | per-root   | none                               | Path-glob blocks that change `thresholds` and `enabled` for matching files. Last matching block wins.  |
 
 Globs use `package:glob` semantics and match the file path **relative to the
@@ -112,8 +112,14 @@ Under `metrics.<id>:`:
 | Key          | Default  | Meaning                                                                                                 |
 | ------------ | -------- | ------------------------------------------------------------------------------------------------------- |
 | `enabled`    | `true`   | Whether the metric runs and reports for files in this root.                                             |
-| `thresholds` | none     | `{ warn: N, fail: M }` with `N <= M`. A value `>= fail` is `fail`, `>= warn` is `warn`, otherwise `ok`. |
+| `thresholds` | metric's | `{ warn: N, fail: M }` with `N <= M`, or `none`. `>= fail` is `fail`, `>= warn` is `warn`, else `ok`.   |
 | knobs        | per knob | Counting knobs the metric declares. Run-global. Listed under each metric below.                         |
+
+Cyclomatic ships with `warn: 10, fail: 20` built in, chosen from a field
+trial over eleven codebases where 10 sat near the 90th–95th percentile of
+scope scores and 20 flagged only real tangles. `thresholds: none` turns
+thresholds off for a metric in that root; `dmetrics stats` shows where your own
+codebase sits before you tune them.
 
 ### Cyclomatic knobs
 
@@ -125,7 +131,7 @@ Under `metrics.<id>:`:
 ### Per-root vs. run-global
 
 Each analyzed file has a **config root**: the nearest ancestor directory whose
-`analysis_options.yaml` has a `metra:` section, otherwise the nearest
+`analysis_options.yaml` has a `dmetrics:` section, otherwise the nearest
 `pubspec.yaml` directory with built-in defaults, otherwise the working
 directory. A monorepo run naturally has several roots, and this lookup is the
 same whether a file was named explicitly or found under a directory.
@@ -146,7 +152,7 @@ Within a root, highest first:
 1. CLI flags: `--threshold`, `--set`, `--fail-on`.
 2. The last matching `overrides` block in that root's config.
 3. That root's top-level `metrics` config.
-4. Built-in defaults: every metric enabled, no thresholds.
+4. Built-in defaults: every metric enabled, the metric's own thresholds.
 
 `overrides` may change only `thresholds` and `enabled`. A run-global key inside
 an override is a config error.
@@ -161,8 +167,8 @@ roots.
 ## Command line
 
 ```
-metra analyze [<file>|<dir> ...] [options]
-metra stats   [<file>|<dir> ...] [options]
+dmetrics analyze [<file>|<dir> ...] [options]
+dmetrics stats   [<file>|<dir> ...] [options]
 ```
 
 No targets means the current directory. Files and directories mix freely.
@@ -186,20 +192,20 @@ Examples:
 
 ```sh
 # Try thresholds without touching the config file
-dart run bin/metra.dart analyze lib --threshold cyclomatic=warn:8,fail:12
+dart run bin/dmetrics.dart analyze lib --threshold cyclomatic=warn:8,fail:12
 
 # Treat warnings as failures for this run
-dart run bin/metra.dart analyze lib --fail-on warn
+dart run bin/dmetrics.dart analyze lib --fail-on warn
 
 # Modified McCabe counting, and fold closures into their parent
-dart run bin/metra.dart analyze lib \
+dart run bin/dmetrics.dart analyze lib \
   --set cyclomatic.count_case_arms=false \
   --set closure_rollup=include_in_parent
 ```
 
-### Calibrating thresholds: `metra stats`
+### Calibrating thresholds: `dmetrics stats`
 
-`metra stats` measures exactly like `analyze` (same targets, config, `--set`,
+`dmetrics stats` measures exactly like `analyze` (same targets, config, `--set`,
 `--threshold`) and then, instead of listing findings, prints per metric the
 numbers a threshold decision needs:
 
@@ -254,24 +260,24 @@ Analyzer-style ignore comments, taken from the token stream so text inside
 string literals never matches:
 
 ```dart
-// ignore: metra_cyclomatic
+// ignore: dmetrics_cyclomatic
 void bigButJustified() { ... }
 
-void alsoFine() { // ignore: metra_cyclomatic
+void alsoFine() { // ignore: dmetrics_cyclomatic
   ...
 }
 
-// ignore_for_file: metra_cyclomatic
+// ignore_for_file: dmetrics_cyclomatic
 ```
 
-- `// ignore: metra_<metric>` on the line immediately before the declaration
+- `// ignore: dmetrics_<metric>` on the line immediately before the declaration
   (before its metadata, if any) or as a trailing comment on the declaration's
   first line. A doc comment between the ignore and the declaration breaks
   the adjacency.
-- `// ignore: metra` suppresses every metric for that scope.
-- `// ignore_for_file: metra_<metric>` or `// ignore_for_file: metra`
+- `// ignore: dmetrics` suppresses every metric for that scope.
+- `// ignore_for_file: dmetrics_<metric>` or `// ignore_for_file: dmetrics`
   anywhere in the file suppresses the whole file.
-- Other names in the same comment (`// ignore: unused_element, metra_cyclomatic`)
+- Other names in the same comment (`// ignore: unused_element, dmetrics_cyclomatic`)
   are ignored, as the analyzer does.
 - A line ignore applies only to the **outermost** scopes starting on that
   line. Suppressing a method does not suppress its closures. To suppress a
@@ -342,6 +348,16 @@ files by path, scopes by start offset, contributors by start offset.
 
 The full specimen and its guarantees are in `SPEC.md` §7.3, and
 `test/golden/report.json` is the golden rendering of it.
+
+## Install
+
+```sh
+make install          # dart compile exe → ~/.local/bin/dmetrics
+dmetrics analyze lib  # from any Dart project
+```
+
+`make help` lists every target: `build`, `test`, `lint`, `format`, `doc`, `clean`,
+and `testf`, `lintf`, `formatf` which take `FILE=<path>`.
 
 ## Development
 

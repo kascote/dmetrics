@@ -1,5 +1,5 @@
-name: metra
-description: A Dart-native static code metrics engine (working name).
+name: dmetrics
+description: A Dart-native static code metrics engine.
 version: 0.1.0
 publish_to: none
 

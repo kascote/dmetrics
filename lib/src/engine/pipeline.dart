@@ -32,7 +32,7 @@ List<ScopeResult> buildResults({
         if (m.measurements.containsKey(metric.id)) m,
     ];
     final aggregated = _aggregate(metric, scopes, run.closureRollup);
-    final threshold = effective[metric.id]?.threshold;
+    final threshold = effectiveThreshold(effective[metric.id], metric);
     final forFile = suppressions.forFile(metric.id);
     for (final s in scopes) {
       final (value, includes) = aggregated[s.scope.id]!;
@@ -108,4 +108,11 @@ int _byStartThenEnd(ScopeMeasurements a, ScopeMeasurements b) {
   return c != 0
       ? c
       : a.scope.span.end.offset.compareTo(b.scope.span.end.offset);
+}
+
+/// The threshold a result reports: the configured one, else the metric's
+/// built-in default; `thresholds: none` ([Threshold.none]) means null.
+Threshold? effectiveThreshold(MetricConfig? config, Metric metric) {
+  final t = config?.threshold ?? metric.defaultThreshold;
+  return t == Threshold.none ? null : t;
 }

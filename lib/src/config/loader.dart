@@ -1,10 +1,10 @@
-/// Config loading (SPEC §8): the `metra:` section of `analysis_options.yaml`
+/// Config loading (SPEC §8): the `dmetrics:` section of `analysis_options.yaml`
 /// and the reconciliation of run-global settings across roots and CLI flags.
 ///
 /// File shape:
 ///
 /// ```yaml
-/// metra:
+/// dmetrics:
 ///   fail_on: fail                    # run-global: warn | fail
 ///   closure_rollup: separate         # run-global: separate | include_in_parent
 ///   include: [lib/**]                # per-root discovery globs; default: all
@@ -12,7 +12,7 @@
 ///   metrics:
 ///     cyclomatic:
 ///       enabled: true
-///       thresholds: {warn: 8, fail: 12}
+///       thresholds: {warn: 8, fail: 12} # or `none` to drop the built-in default
 ///       count_case_arms: true        # run-global knob, declared by the metric
 ///       count_null_coalescing: true
 ///   overrides:                       # thresholds and enablement only
@@ -33,7 +33,7 @@ import '../engine/result.dart';
 import 'config.dart';
 
 /// The YAML key the config lives under.
-const configKey = 'metra';
+const configKey = 'dmetrics';
 
 /// Something wrong with a config file or the combination of config files.
 class ConfigProblem {
@@ -85,9 +85,9 @@ class LoadedConfig {
   });
 }
 
-/// Parses the `metra:` section of [text]. Returns null when there is none
+/// Parses the `dmetrics:` section of [text]. Returns null when there is none
 /// (the file then does not make its directory a config root).
-LoadedConfig? parseMetraConfig(
+LoadedConfig? parseDmetricsConfig(
   String text, {
   required String source,
   required List<Metric> metrics,
@@ -126,7 +126,7 @@ class _Parser {
   LoadedConfig parse(YamlNode section) {
     var root = RootConfig(source: source);
     if (section is YamlScalar && section.value == null) {
-      // `metra:` with nothing under it: a root with defaults.
+      // `dmetrics:` with nothing under it: a root with defaults.
     } else if (section is! YamlMap) {
       problem('`$configKey` must be a map', section);
     } else {
@@ -267,6 +267,7 @@ class _Parser {
   }
 
   Threshold? _threshold(YamlNode node) {
+    if (node is YamlScalar && node.value == 'none') return Threshold.none;
     if (node is YamlMap) {
       final warn = node.nodes['warn']?.value;
       final fail = node.nodes['fail']?.value;
@@ -274,7 +275,10 @@ class _Parser {
         return Threshold(warn: warn, fail: fail);
       }
     }
-    problem('`thresholds` must be `{warn: n, fail: m}` with n <= m', node);
+    problem(
+      '`thresholds` must be `{warn: n, fail: m}` with n <= m, or `none`',
+      node,
+    );
     return null;
   }
 

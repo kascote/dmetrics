@@ -18,7 +18,6 @@ linter:
     - prefer_final_locals
     - unawaited_futures
 
-metra:
-  metrics:
-    cyclomatic:
-      thresholds: { warn: 10, fail: 20 }
+# Built-in defaults (cyclomatic warn 10 / fail 20); the bare key makes this
+# directory a config root.
+dmetrics:

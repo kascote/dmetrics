@@ -1,6 +1,6 @@
-/// `metra analyze [<file>|<dir> ...] [--json] [--config <path>]
+/// `dmetrics analyze [<file>|<dir> ...] [--json] [--config <path>]
 /// [--fail-on warn|fail] [--set <key>=<value>] [--threshold <spec>]` (§7.1),
-/// and `metra stats` with the same targets and config handling.
+/// and `dmetrics stats` with the same targets and config handling.
 ///
 /// Exit codes (§7.2): 0 clean, 1 violations, 2 analysis incomplete, 3 usage.
 /// `stats` never exits 1: violations are its subject, not its outcome. In

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "tool": {
-    "name": "metra",
+    "name": "dmetrics",
     "version": "0.1.0"
   },
   "status": "violations",

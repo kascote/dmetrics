@@ -1,14 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:metra/metra.dart';
-import 'package:metra/src/cli/cli.dart';
+import 'package:dmetrics/dmetrics.dart';
+import 'package:dmetrics/src/cli/cli.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
   late Directory tmp;
-  setUp(() => tmp = Directory.systemTemp.createTempSync('metra_cli_'));
+  setUp(() => tmp = Directory.systemTemp.createTempSync('dmetrics_cli_'));
   tearDown(() => tmp.deleteSync(recursive: true));
 
   void write(String rel, String content) {
@@ -160,7 +160,7 @@ void main() {
       write('lib/a.dart', fn);
       write(
         'conf/analysis_options.yaml',
-        'metra:\n  metrics:\n    cyclomatic: {count_null_coalescing: false}\n',
+        'dmetrics:\n  metrics:\n    cyclomatic: {count_null_coalescing: false}\n',
       );
       final r = run([
         'analyze',
@@ -188,7 +188,7 @@ void main() {
 
     test('invalid config: exit 2, diagnostic on stderr-free console', () {
       write('pubspec.yaml', 'name: x\n');
-      write('analysis_options.yaml', 'metra:\n  nope: 1\n');
+      write('analysis_options.yaml', 'dmetrics:\n  nope: 1\n');
       write('lib/a.dart', fn);
       final r = run(['analyze']);
       expect(r.code, 2);
@@ -249,17 +249,29 @@ void main() {
       expect(json, isNot(contains('files')));
     });
 
-    test('no thresholds in config: none configured', () {
+    test('built-in 10/20 applies; `thresholds: none` opts out', () {
       write('lib/a.dart', fn);
+      expect(run(['stats']).out, contains('Thresholds • warn ≥ 10, fail ≥ 20'));
+      write('pubspec.yaml', 'name: x\n');
+      write(
+        'analysis_options.yaml',
+        'dmetrics:\n  metrics:\n    cyclomatic: {thresholds: none}\n',
+      );
       expect(run(['stats']).out, contains('Thresholds • none configured'));
+      final json = jsonDecode(run(['analyze', '--json']).out) as Map;
+      final configs = json['configs'] as List;
+      expect(
+        ((configs.single['metrics'] as Map)['cyclomatic'] as Map)['thresholds'],
+        isNull,
+      );
     });
   });
 
-  test('bin/metra.dart end to end', () {
+  test('bin/dmetrics.dart end to end', () {
     write('lib/a.dart', fn);
     final result = Process.runSync(Platform.resolvedExecutable, [
       'run',
-      p.absolute('bin/metra.dart'),
+      p.absolute('bin/dmetrics.dart'),
       'analyze',
       'lib',
       '--json',

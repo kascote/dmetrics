@@ -1,4 +1,4 @@
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 import 'package:test/test.dart';
 
 /// Per-root overrides and CLI layers as the engine applies them (§8).

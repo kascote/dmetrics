@@ -1,4 +1,4 @@
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 
 /// Per-metric invariants the harness asserts on every result (SPEC §6.1, §6.3).
 class ResultInvariants {

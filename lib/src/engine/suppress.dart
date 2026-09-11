@@ -1,8 +1,8 @@
 /// `// ignore:` suppressions (SPEC §8).
 ///
-/// `// ignore: metra_cyclomatic` on the line immediately before a scope's
+/// `// ignore: dmetrics_cyclomatic` on the line immediately before a scope's
 /// declaration or on the declaration's first line; `// ignore_for_file:
-/// metra_cyclomatic` anywhere in the file; `metra` alone names every metric.
+/// dmetrics_cyclomatic` anywhere in the file; `dmetrics` alone names every metric.
 /// A suppression on a method does not suppress its closures: a line ignore
 /// applies only to the outermost measured scopes starting on that line.
 library;
@@ -13,7 +13,7 @@ import 'package:source_span/source_span.dart' as ss;
 import 'result.dart';
 
 class IgnoreComment {
-  static const prefix = 'metra';
+  static const prefix = 'dmetrics';
 
   final SuppressionKind kind;
   final Set<String> names;

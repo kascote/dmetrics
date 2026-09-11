@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 
 import 'harness/harness.dart';
 import 'probe/nesting_probe.dart';

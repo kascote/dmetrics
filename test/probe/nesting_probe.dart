@@ -10,7 +10,7 @@ library;
 import 'dart:math' as math;
 
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 
 class NestingProbe extends Metric {
   @override

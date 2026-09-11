@@ -1,4 +1,4 @@
-/// `metra stats`: the threshold-calibration numbers a field trial computes
+/// `dmetrics stats`: the threshold-calibration numbers a field trial computes
 /// by hand, derived from a finished [RunResult] and nothing else. Per metric:
 /// the value distribution (bands and percentiles), the share of scopes at or
 /// above the applied thresholds, a sweep over candidate thresholds, the

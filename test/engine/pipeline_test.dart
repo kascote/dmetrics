@@ -1,4 +1,4 @@
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 import 'package:test/test.dart';
 
 import '../harness/dummy_metrics.dart';
@@ -37,6 +37,25 @@ void high(int a) {
         expect(res.threshold, isNull);
         expect(res.verdict, Verdict.ok);
       }
+    });
+
+    test('a metric default applies unless config says `none`', () {
+      const bare = AnalysisConfig();
+      final r = analyze([src(content)], [CyclomaticMetric()], bare);
+      final cyclomatic = r.files.single.scopes.first.results['cyclomatic']!;
+      expect(cyclomatic.threshold, const Threshold(warn: 10, fail: 20));
+      const opted = AnalysisConfig(
+        roots: {
+          '.': RootConfig(
+            metrics: {'cyclomatic': MetricConfig(threshold: Threshold.none)},
+          ),
+        },
+      );
+      final none = analyze([src(content)], [CyclomaticMetric()], opted);
+      expect(
+        none.files.single.scopes.first.results['cyclomatic']!.threshold,
+        isNull,
+      );
     });
 
     test('warn and fail are inclusive lower bounds', () {

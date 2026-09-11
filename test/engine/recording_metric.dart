@@ -1,5 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 
 /// Records the event stream as readable lines for lifecycle assertions.
 ///

@@ -2,7 +2,7 @@
 library;
 
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 
 /// `1 + number of if statements` per measured scope, with one `if`
 /// contributor per statement. Shaped like cyclomatic so the same invariants

@@ -1,4 +1,4 @@
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -6,7 +6,7 @@ void main() {
   // Values: low 1, mid 2, hidden/high/twin 3 (ternary ×2), name 9 (case ×8).
   const content = '''
 int low() => 0;
-// ignore: metra_cyclomatic
+// ignore: dmetrics_cyclomatic
 int hidden(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 int high(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 int twin(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
@@ -48,7 +48,13 @@ String name(int x) => switch (x) {
       ),
     },
   );
-  const bare = AnalysisConfig(roots: {'.': RootConfig()});
+  const bare = AnalysisConfig(
+    roots: {
+      '.': RootConfig(
+        metrics: {'cyclomatic': MetricConfig(threshold: Threshold.none)},
+      ),
+    },
+  );
 
   group('computeStats', () {
     final m = computeStats(run(thresholded)).metrics['cyclomatic']!;

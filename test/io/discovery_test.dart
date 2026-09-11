@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -9,7 +9,7 @@ void main() {
   late Directory tmp;
   final metrics = [CyclomaticMetric()];
 
-  setUp(() => tmp = Directory.systemTemp.createTempSync('metra_io_'));
+  setUp(() => tmp = Directory.systemTemp.createTempSync('dmetrics_io_'));
   tearDown(() => tmp.deleteSync(recursive: true));
 
   void write(String rel, String content) {
@@ -85,14 +85,14 @@ void main() {
   });
 
   group('config roots', () {
-    test('nearest analysis_options.yaml with a metra section', () {
+    test('nearest analysis_options.yaml with a dmetrics section', () {
       write('pubspec.yaml', 'name: x\n');
       write(
         'analysis_options.yaml',
-        'metra:\n  metrics:\n    cyclomatic: {thresholds: {warn: 1, fail: 2}}\n',
+        'dmetrics:\n  metrics:\n    cyclomatic: {thresholds: {warn: 1, fail: 2}}\n',
       );
       write('lib/a.dart', fn);
-      write('lib/nested/analysis_options.yaml', 'metra:\n  exclude: []\n');
+      write('lib/nested/analysis_options.yaml', 'dmetrics:\n  exclude: []\n');
       write('lib/nested/b.dart', fn);
       write('lib/nested/deep/c.g.dart', fn);
       write('lib/other/analysis_options.yaml', 'linter:\n  rules: []\n');
@@ -105,7 +105,7 @@ void main() {
           'lib/nested/b.dart': 'lib/nested',
           'lib/nested/deep/c.g.dart':
               'lib/nested', // that root's exclude is empty
-          'lib/other/d.dart': '.', // no metra key: not a root
+          'lib/other/d.dart': '.', // no dmetrics key: not a root
         },
       );
       expect(d.roots.keys, unorderedEquals(['.', 'lib/nested']));
@@ -117,7 +117,7 @@ void main() {
       write('pubspec.yaml', 'name: x\n');
       write(
         'analysis_options.yaml',
-        "metra:\n  include: ['lib/**']\n  exclude: ['lib/skip/**']\n",
+        "dmetrics:\n  include: ['lib/**']\n  exclude: ['lib/skip/**']\n",
       );
       write('lib/a.dart', fn);
       write('lib/skip/b.dart', fn);
@@ -130,12 +130,15 @@ void main() {
     });
 
     test(
-      'package root without a metra section is a defaults root',
+      'package root without a dmetrics section is a defaults root',
       () {
         write('mono/pkg_a/pubspec.yaml', 'name: a\n');
         write('mono/pkg_a/lib/a.dart', fn);
         write('mono/pkg_b/pubspec.yaml', 'name: b\n');
-        write('mono/pkg_b/analysis_options.yaml', 'metra:\n  fail_on: warn\n');
+        write(
+          'mono/pkg_b/analysis_options.yaml',
+          'dmetrics:\n  fail_on: warn\n',
+        );
         write('mono/pkg_b/lib/a.dart', fn);
         write('loose.dart', fn);
         final d = expand(['mono', 'loose.dart']);
@@ -158,8 +161,8 @@ void main() {
 
     test('--config forces one root for every file', () {
       write('pubspec.yaml', 'name: x\n');
-      write('conf/analysis_options.yaml', 'metra:\n  fail_on: warn\n');
-      write('lib/analysis_options.yaml', 'metra:\n  fail_on: fail\n');
+      write('conf/analysis_options.yaml', 'dmetrics:\n  fail_on: warn\n');
+      write('lib/analysis_options.yaml', 'dmetrics:\n  fail_on: fail\n');
       write('lib/a.dart', fn);
       write('other/b.dart', fn);
       final d = expand(['.'], configPath: 'conf/analysis_options.yaml');
@@ -177,7 +180,7 @@ void main() {
 
     test('config problems surface through analyzePaths as errors', () {
       write('pubspec.yaml', 'name: x\n');
-      write('analysis_options.yaml', 'metra:\n  fail_on: sometimes\n');
+      write('analysis_options.yaml', 'dmetrics:\n  fail_on: sometimes\n');
       write('lib/a.dart', fn);
       final r = analyzePaths(['lib'], metrics: metrics, runRoot: tmp.path);
       expect(r.status, RunStatus.errors);
@@ -199,13 +202,13 @@ void main() {
       write('a/pubspec.yaml', 'name: a\n');
       write(
         'a/analysis_options.yaml',
-        'metra:\n  metrics:\n    cyclomatic: {count_case_arms: false}\n',
+        'dmetrics:\n  metrics:\n    cyclomatic: {count_case_arms: false}\n',
       );
       write('a/lib/x.dart', fn);
       write('b/pubspec.yaml', 'name: b\n');
       write(
         'b/analysis_options.yaml',
-        'metra:\n  metrics:\n    cyclomatic: {count_case_arms: true}\n',
+        'dmetrics:\n  metrics:\n    cyclomatic: {count_case_arms: true}\n',
       );
       write('b/lib/x.dart', fn);
       final r = analyzePaths(['a', 'b'], metrics: metrics, runRoot: tmp.path);
@@ -237,7 +240,7 @@ void main() {
         write('a/pubspec.yaml', 'name: a\n');
         write(
           'a/analysis_options.yaml',
-          'metra:\n  metrics:\n    cyclomatic: {thresholds: {warn: 2, fail: 3}}\n',
+          'dmetrics:\n  metrics:\n    cyclomatic: {thresholds: {warn: 2, fail: 3}}\n',
         );
         write('a/lib/x.dart', fn);
         write('b/pubspec.yaml', 'name: b\n');
@@ -278,7 +281,7 @@ void main() {
         write('pubspec.yaml', 'name: x\n');
         write(
           'analysis_options.yaml',
-          'metra:\n  metrics:\n    cyclomatic: {thresholds: {warn: 1, fail: 2}}\n',
+          'dmetrics:\n  metrics:\n    cyclomatic: {thresholds: {warn: 1, fail: 2}}\n',
         );
         write('lib/bad.dart', 'int f(int x) => x > 0 ? 1 : 0\n');
         final r = analyzePaths(['lib'], metrics: metrics, runRoot: tmp.path);

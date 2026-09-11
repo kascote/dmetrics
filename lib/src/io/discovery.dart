@@ -20,7 +20,7 @@ class DiscoveredSources {
   final List<SourceFile> sources;
 
   /// Every config root seen, keyed run-root-relative; null means built-in
-  /// defaults (no `metra:` section above the file).
+  /// defaults (no `dmetrics:` section above the file).
   final Map<String, LoadedConfig?> roots;
 
   /// Unreadable files and other I/O problems.
@@ -133,7 +133,7 @@ class Discovery {
   }
 
   /// The nearest ancestor of [dir] whose `analysis_options.yaml` has a
-  /// `metra:` section; otherwise the package root (nearest `pubspec.yaml`),
+  /// `dmetrics:` section; otherwise the package root (nearest `pubspec.yaml`),
   /// with defaults; otherwise the run root, with defaults.
   _Root _rootFor(String dir) {
     final cached = _dirRoots[dir];
@@ -172,7 +172,7 @@ class Discovery {
 
   LoadedConfig? _parseFile(String abs) => _parsedFiles.putIfAbsent(
     abs,
-    () => parseMetraConfig(
+    () => parseDmetricsConfig(
       File(abs).readAsStringSync(),
       source: _relative(abs),
       metrics: metrics,

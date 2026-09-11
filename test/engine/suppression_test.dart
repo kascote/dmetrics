@@ -1,4 +1,4 @@
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 import 'package:test/test.dart';
 
 import 'recording_metric.dart';
@@ -26,7 +26,7 @@ void main() {
   group('suppressions (§8)', () {
     test('ignore on the line before the declaration', () {
       final r = run('''
-// ignore: metra_cyclomatic
+// ignore: dmetrics_cyclomatic
 int a(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 int b(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 ''');
@@ -39,20 +39,20 @@ int b(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 
     test('ignore as a trailing comment on the first line', () {
       final r = run('''
-int a(int x) => // ignore: metra_cyclomatic
+int a(int x) => // ignore: dmetrics_cyclomatic
     x > 0 ? (x > 1 ? 2 : 1) : 0;
 ''');
       expect(r['a']!.suppressed?.kind, SuppressionKind.ignore);
       expect(r['a']!.suppressed!.span.start.line + 1, 1);
     });
 
-    test('metra alone names every metric; other names do not apply', () {
+    test('dmetrics alone names every metric; other names do not apply', () {
       final r = run('''
-// ignore: metra
+// ignore: dmetrics
 int a(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
-// ignore: metra_cognitive, unused_element
+// ignore: dmetrics_cognitive, unused_element
 int b(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
-// ignore: unused_element, metra_cyclomatic
+// ignore: unused_element, dmetrics_cyclomatic
 int c(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 ''');
       expect(r['a']!.suppressed, isNotNull);
@@ -62,7 +62,7 @@ int c(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 
     test('an ignore two lines up, or with metadata in between, is ignored', () {
       final r = run('''
-// ignore: metra_cyclomatic
+// ignore: dmetrics_cyclomatic
 
 int a(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 ''');
@@ -71,7 +71,7 @@ int a(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 
     test('ignore before metadata suppresses the annotated declaration', () {
       final r = run('''
-// ignore: metra_cyclomatic
+// ignore: dmetrics_cyclomatic
 @deprecated
 int a(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 ''');
@@ -81,7 +81,7 @@ int a(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
     test('a suppression on a method does not suppress its closures', () {
       final r = run('''
 class C {
-  // ignore: metra_cyclomatic
+  // ignore: dmetrics_cyclomatic
   void m(List<int> xs) {
     if (xs.isEmpty) return;
     xs.forEach((x) {
@@ -97,7 +97,7 @@ class C {
 
     test('a closure on the method\'s first line is not reached either', () {
       final r = run('''
-// ignore: metra_cyclomatic
+// ignore: dmetrics_cyclomatic
 void m(List<int> xs) => xs.forEach((x) {
   if (x > 0 || x < -1 || x == 5) print(x);
 });
@@ -109,7 +109,7 @@ void m(List<int> xs) => xs.forEach((x) {
     test('a closure can be suppressed on its own line', () {
       final r = run('''
 void m(List<int> xs) {
-  // ignore: metra_cyclomatic
+  // ignore: dmetrics_cyclomatic
   xs.forEach((x) {
     if (x > 0 || x < -1 || x == 5) print(x);
   });
@@ -125,7 +125,7 @@ int a(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 class C {
   int b(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 }
-// ignore_for_file: metra_cyclomatic
+// ignore_for_file: dmetrics_cyclomatic
 ''');
       for (final res in r.values) {
         expect(res.suppressed?.kind, SuppressionKind.ignoreForFile);
@@ -136,7 +136,7 @@ class C {
 
     test('ignore_for_file for another metric changes nothing', () {
       final r = run('''
-// ignore_for_file: metra_cognitive
+// ignore_for_file: dmetrics_cognitive
 int a(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 ''');
       expect(r['a']!.suppressed, isNull);
@@ -144,7 +144,7 @@ int a(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 
     test('an ignore inside a string literal is not a comment', () {
       final r = run('''
-const s = '// ignore: metra_cyclomatic';
+const s = '// ignore: dmetrics_cyclomatic';
 int a(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 ''');
       expect(r['a']!.suppressed, isNull);
@@ -154,12 +154,12 @@ int a(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
   group('Suppressions.scan', () {
     test('collects kinds, names and spans', () {
       final s = analyzeSuppressions('''
-// ignore_for_file: metra, foo
-void f() {} // ignore:metra_x
+// ignore_for_file: dmetrics, foo
+void f() {} // ignore:dmetrics_x
 ''');
       expect(s.comments.map((c) => c.toString()), [
-        'ignoreForFile {metra, foo} @1',
-        'ignore {metra_x} @2',
+        'ignoreForFile {dmetrics, foo} @1',
+        'ignore {dmetrics_x} @2',
       ]);
       expect(s.forFile('anything'), isNotNull);
       expect(s.forLine(1, 'x'), isNotNull);

@@ -1,11 +1,11 @@
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 import 'package:test/test.dart';
 
 void main() {
   final metrics = [CyclomaticMetric()];
   const content = '''
 int low() => 0;
-// ignore: metra_cyclomatic
+// ignore: dmetrics_cyclomatic
 int hidden(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 int high(int x) => x > 0 ? (x > 1 ? 2 : 1) : 0;
 String name(int x) => switch (x) {

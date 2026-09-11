@@ -10,6 +10,8 @@ import 'package:source_span/source_span.dart' show FileSpan, SourceLocation;
 
 import '../config/config.dart';
 import '../engine/measurement.dart';
+import '../engine/metric.dart';
+import '../engine/pipeline.dart';
 import '../engine/report.dart';
 import '../engine/result.dart';
 import '../engine/scope.dart';
@@ -74,7 +76,8 @@ Map<String, Object?> _config(String root, RootConfig c, RunResult result) => {
   'root': root,
   'source': c.source,
   'metrics': {
-    for (final m in result.metrics) m.id: _metricConfig(c.metrics[m.id]),
+    for (final m in result.metrics)
+      m.id: _metricConfig(c.metrics[m.id], metric: m),
   },
   if (c.overrides.isNotEmpty)
     'overrides': [
@@ -88,13 +91,17 @@ Map<String, Object?> _config(String root, RootConfig c, RunResult result) => {
     ],
 };
 
-Map<String, Object?> _metricConfig(MetricConfig? m) => {
+/// With [metric], the effective thresholds (built-in default included);
+/// without it (override blocks), what the block itself says.
+Map<String, Object?> _metricConfig(MetricConfig? m, {Metric? metric}) => {
   'enabled': m?.isEnabled ?? true,
-  'thresholds': _threshold(m?.threshold),
+  'thresholds': _threshold(
+    metric == null ? m?.threshold : effectiveThreshold(m, metric),
+  ),
 };
 
 Map<String, Object?>? _threshold(Threshold? t) =>
-    t == null ? null : {'warn': t.warn, 'fail': t.fail};
+    t == null || t == Threshold.none ? null : {'warn': t.warn, 'fail': t.fail};
 
 Map<String, Object?> _runDiagnostic(RunDiagnostic d) => {
   'path': d.path,

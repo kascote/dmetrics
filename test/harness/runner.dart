@@ -1,4 +1,4 @@
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 
 import 'fixture.dart';
 import 'invariants.dart';

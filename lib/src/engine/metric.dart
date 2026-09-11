@@ -2,6 +2,7 @@ import 'package:analyzer/dart/ast/ast.dart';
 
 import '../config/config.dart';
 import 'measurement.dart';
+import 'result.dart';
 import 'scope.dart';
 
 enum MetricRequirements { syntactic, resolved }
@@ -35,6 +36,11 @@ abstract class Metric {
   /// documented defaults. The config loader validates values against the
   /// default's type and reports every knob in the JSON `run` section.
   Map<String, Object?> get settingDefaults => const {};
+
+  /// Thresholds that apply when no config root sets any. Null means every
+  /// verdict is `ok` until a threshold is configured; `thresholds: none` in
+  /// a config opts out of a non-null default.
+  Threshold? get defaultThreshold => null;
 
   /// Fires once per run before the first file. Metrics read their run-global
   /// knobs from `ctx.config.run.settings` here.

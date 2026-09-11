@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 import 'package:test/test.dart';
 
 /// The JSON schema is the public interface (§7.3): a golden file pins the
@@ -133,7 +133,7 @@ String name(int x) => switch (x) {
 
   test('suppressed and rolled-up results serialize per the contract', () {
     const content = '''
-// ignore: metra_cyclomatic
+// ignore: dmetrics_cyclomatic
 void m(List<int> xs) {
   if (xs.isEmpty) return;
   xs.forEach((x) {

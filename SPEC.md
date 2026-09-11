@@ -1,9 +1,9 @@
 # Dart Code Metrics Engine — High-Level Spec
 
 **Status:** Draft 0.6 · **Owner:** Nelson · **Date:** 2026-09-11
-**Working name:** TBD (placeholder: `metra`)
+**Name:** `dmetrics`
 
-**Changes in 0.7 (M4 field trial):** `--color auto|always|never` for the console reporter (verdict tag, table-shaped marker, diagnostic severity and the status word only; `auto` follows the tty, `NO_COLOR` and `TERM=dumb`; `--json` never colors). `table-shaped: <kind>` marker on console lines and `tableShaped: { kind, share }` in JSON results when one contributor kind supplies ≥ 70% of a scope's increments (≥ 8 in total). Motivation: across eleven trial codebases the false fails were `case` tables (opcode dispatch, `_contributorFor`, a text editor's `_executeAction`) and field-wise `==`/`copyWith`; the cut started at 80% and moved to 70% because tables whose arms carry `pattern-or` land at ~75% while the closest real tangle in the labeled set sits at 65%; the scalar cannot separate `case ×20` from `case ×12, if ×12`, the breakdown can. A reading hint for consumers, not a counting change (N6 intact). `metra stats [targets]`: the calibration analysis the trial did by hand, per metric from a finished run (value bands and nearest-rank percentiles, share at or above the applied `warn`/`fail` with the table-shaped count among them, a sweep over fixed candidates, contributor mix by summed increment, sibling clusters of equal value and contributor summary at or above `warn`). Same targets and config handling as `analyze`, `--json` as a separate document, exit 0/2/3 only.
+**Changes in 0.7 (M4 field trial):** `--color auto|always|never` for the console reporter (verdict tag, table-shaped marker, diagnostic severity and the status word only; `auto` follows the tty, `NO_COLOR` and `TERM=dumb`; `--json` never colors). `table-shaped: <kind>` marker on console lines and `tableShaped: { kind, share }` in JSON results when one contributor kind supplies ≥ 70% of a scope's increments (≥ 8 in total). Motivation: across eleven trial codebases the false fails were `case` tables (opcode dispatch, `_contributorFor`, a text editor's `_executeAction`) and field-wise `==`/`copyWith`; the cut started at 80% and moved to 70% because tables whose arms carry `pattern-or` land at ~75% while the closest real tangle in the labeled set sits at 65%; the scalar cannot separate `case ×20` from `case ×12, if ×12`, the breakdown can. A reading hint for consumers, not a counting change (N6 intact). `dmetrics stats [targets]`: the calibration analysis the trial did by hand, per metric from a finished run (value bands and nearest-rank percentiles, share at or above the applied `warn`/`fail` with the table-shaped count among them, a sweep over fixed candidates, contributor mix by summed increment, sibling clusters of equal value and contributor summary at or above `warn`). Same targets and config handling as `analyze`, `--json` as a separate document, exit 0/2/3 only. Built-in cyclomatic thresholds `warn: 10, fail: 20` (`Metric.defaultThreshold`, `thresholds: none` opts out), closing the question §8 deferred to M4. Working name dropped: the tool, package, config key and suppression marker are `dmetrics`.
 
 **Changes in 0.6 (M3 as built):** config file shape specified (§8); metrics declare their run-global knobs with defaults (`settingDefaults`) so the loader can type-check them and the JSON `run` block always lists every knob; `fingerprint` added to `ScopeContext`; JSON gains a top-level `diagnostics[]` for problems with no parsed file to hang off (config errors, unreadable files), `configs[].overrides` when non-empty, `detail` only when non-null; CLI gains `--threshold`, `--json-contributors`, `--all`; a missing `--config` file is a usage error; suppression placement pinned down (trailing on the first line, before metadata, outermost scope on the line only); no built-in thresholds — without config every verdict is `ok`; `yaml` and `path` added to the dependency list; §5.2 gains the `RunResult` type that wraps the engine report for reporters.
 
@@ -35,7 +35,7 @@ Two framing decisions shape the roadmap:
 - **G5 — Opinionated defaults, minimal knobs.** Counting semantics are uniform across a run. The two knobs in §6.2 exist because respected tools disagree; a disagreement alone does not create a knob (see §4). Thresholds and enablement can vary by path glob, by config root, and via `// ignore:` suppressions; measurement semantics cannot.
 - **G6 — Executable spec via annotated fixtures.** Every row of the counting table in §6.1 has at least one annotated Dart fixture (`// expect: cyclomatic=4`), doubling as regression test and documentation.
 - **G7 — Fast on syntactic metrics.** Use `parseFile()`-level parsing (no resolution) whenever the requested metric set allows it. Benchmark hypothesis, to be measured at M4 under defined conditions (cold AOT process, config discovery, parsing, analysis, JSON serialization to stdout, all included): a single 2k-LOC file in well under one second; a ~50k-LOC package in low single-digit seconds.
-- **G8 — Agent-first ergonomics.** One command, `metra analyze [targets…] --json`, over any mix of files and directories, mirroring `dart analyze`. JSON output includes a _contributor breakdown_ (which constructs produced the score, with spans) so an LLM gets an actionable refactor hint, not just a verdict. Analysis failures (parse errors, unreadable files, bad config) are never confusable with a clean report: distinct exit code, distinct status field (see §7.2).
+- **G8 — Agent-first ergonomics.** One command, `dmetrics analyze [targets…] --json`, over any mix of files and directories, mirroring `dart analyze`. JSON output includes a _contributor breakdown_ (which constructs produced the score, with spans) so an LLM gets an actionable refactor hint, not just a verdict. Analysis failures (parse errors, unreadable files, bad config) are never confusable with a clean report: distinct exit code, distinct status field (see §7.2).
 - **G9 — Resolved-ready interfaces.** Coupling/dependency metrics are a committed future, so the interfaces already carry: `MetricRequirements { syntactic | resolved }`, structural class/file contexts today and `library` reserved, per-metric `measures` so new scope kinds never leak into old metrics, a structured `detail` slot, a run-level `finish` hook, and engine-side pipeline selection. Adding the resolved pipeline must not change any existing metric, and existing reporters must keep producing a useful generic rendering of new result types.
 
 ## 3. Non-goals
@@ -66,7 +66,7 @@ Research task before M2: build a comparison table of counting decisions across d
 ┌─────────────────────────────────────────────────────┐
 │ Consumers    agent (post-edit) │ CI │ human console │
 ├─────────────────────────────────────────────────────┤
-│ CLI (thin)   metra analyze [files|dirs] [--json]    │
+│ CLI (thin)   dmetrics analyze [files|dirs] [--json]    │
 ├─────────────────────────────────────────────────────┤
 │ I/O layer    discovery (globs, excludes, *.g.dart)  │
 │              config-root lookup, file reading       │
@@ -309,14 +309,14 @@ Class- and file-level aggregates (max, sum, p90) are **not** produced in v1. The
 
 Three consumers, in priority order:
 
-1. **Agent, post-edit.** After finishing a task or a coherent batch of edits, the agent runs `metra analyze <file|dir> --json`, exactly as it would run `dart analyze`, wired via a line in `CLAUDE.md` ("after editing, run `metra analyze` on touched files; keep functions under 10"). The JSON contributor breakdown ("6 case arms, 4 nested ifs, 3 `??`", each with a span) turns a threshold failure into a refactor hint the model can act on. One report per decision point; no streaming, no per-keystroke feedback.
+1. **Agent, post-edit.** After finishing a task or a coherent batch of edits, the agent runs `dmetrics analyze <file|dir> --json`, exactly as it would run `dart analyze`, wired via a line in `CLAUDE.md` ("after editing, run `dmetrics analyze` on touched files; keep functions under 10"). The JSON contributor breakdown ("6 case arms, 4 nested ifs, 3 `??`", each with a span) turns a threshold failure into a refactor hint the model can act on. One report per decision point; no streaming, no per-keystroke feedback.
 2. **CI backstop.** Whole-repo run, strict thresholds, exit codes, JSON artifact. The baseline file (recorded existing violations, fail only on new/worsened) is what lets CI be strict on agent-written code without a legacy cleanup crusade — a v2 commitment. Resolved metrics, when they land, live here.
 3. **Editor integration (later).** Humans read the console output from v1. CodeLens-style "CC 14" in an editor, for judging what the agent produced, is nice, not necessary; see N4.
 
 ### 7.1 CLI shape
 
 ```
-metra analyze [<file>|<dir> ...] [--json] [--json-contributors full|summary] [--all]
+dmetrics analyze [<file>|<dir> ...] [--json] [--json-contributors full|summary] [--all]
               [--config <path>] [--fail-on warn|fail] [--set <key>=<value>]
               [--threshold <metric>=warn:N,fail:M]
 ```
@@ -328,7 +328,7 @@ metra analyze [<file>|<dir> ...] [--json] [--json-contributors full|summary] [--
 - `--help` / `--version` as usual. A nonexistent target or `--config` file is a usage error (exit 3).
 
 ```
-metra stats [<file>|<dir> ...] [--json] [--config <path>] [--set <key>=<value>]
+dmetrics stats [<file>|<dir> ...] [--json] [--config <path>] [--set <key>=<value>]
             [--threshold <metric>=warn:N,fail:M] [--color auto|always|never]
 ```
 
@@ -357,7 +357,7 @@ The schema is the tool's real public interface; this specimen is a golden test. 
 ```json
 {
   "schemaVersion": 1,
-  "tool": { "name": "metra", "version": "0.1.0" },
+  "tool": { "name": "dmetrics", "version": "0.1.0" },
   "status": "violations",
   "configs": [
     {
@@ -480,15 +480,15 @@ Contract notes:
 **Package layout** (single package to start; split only if the CLI grows):
 
 ```
-metra/
+dmetrics/
   lib/
-    metra.dart              # public API: analyze(), analyzePaths()
+    dmetrics.dart              # public API: analyze(), analyzePaths()
     src/engine/             # driver visitor, context stack, aggregation, thresholds
     src/metrics/cyclomatic/
     src/io/                 # discovery, reading, config-root lookup (the only fs code)
     src/config/
     src/report/
-  bin/metra.dart            # CLI entry
+  bin/dmetrics.dart            # CLI entry
   test/
     fixtures/cyclomatic/    # annotated .dart fixture files, one per §6.1 row minimum
     engine/                 # context/scope lifecycle tests (in-memory sources)
@@ -498,10 +498,10 @@ metra/
 
 **Dependencies:** `analyzer`, `args`, `glob`, `path`, `source_span`, `yaml`, `test`. Nothing else until it hurts (`path` and `yaml` are already transitive via `analyzer`).
 
-**Config file.** The `metra:` section of `analysis_options.yaml`:
+**Config file.** The `dmetrics:` section of `analysis_options.yaml`:
 
 ```yaml
-metra:
+dmetrics:
   fail_on: fail                        # run-global: warn | fail
   closure_rollup: separate             # run-global: separate | include_in_parent
   include: ['lib/**', 'bin/**']        # per-root discovery globs; default: every .dart file
@@ -521,9 +521,9 @@ metra:
         cyclomatic: { enabled: false }
 ```
 
-Unknown keys, unknown metric ids, unknown or mistyped knobs, `warn > fail`, malformed YAML, and a run-global key inside `overrides` are all config errors (exit 2) with a file position. A bare `metra:` with nothing under it still makes its directory a root, with defaults. Built-in defaults are: every compiled-in metric enabled, **no thresholds** (every verdict `ok` until a threshold is configured or passed with `--threshold`), the default `exclude` list. A default threshold for cyclomatic is deliberately not built in yet; M4 decides with data.
+Unknown keys, unknown metric ids, unknown or mistyped knobs, `warn > fail`, malformed YAML, and a run-global key inside `overrides` are all config errors (exit 2) with a file position. A bare `dmetrics:` with nothing under it still makes its directory a root, with defaults. Built-in defaults are: every compiled-in metric enabled, each metric's own default thresholds (`Metric.defaultThreshold`; cyclomatic `warn: 10, fail: 20`, decided at M4 with data: across eleven trial codebases 10 sat near the 90th–95th percentile and 20 was precise), the default `exclude` list. `thresholds: none` under a metric opts out of its default for that root (every verdict `ok` until `--threshold` says otherwise); a metric with no default behaves as if `none` were set. `configs[].metrics.<id>.thresholds` in the JSON report is the effective pair, default included.
 
-**Config roots.** Config is read from `analysis_options.yaml` under a `metra:` key. Each analyzed file's **config root** is the nearest ancestor directory containing an `analysis_options.yaml` with that key (or the package root if none has it, using built-in defaults). This lookup is per file and identical whether the file was named explicitly or discovered under a directory, so both paths yield the same measurement and the same policy. `--config <path>` forces a single root for the whole run. A monorepo run therefore naturally has several roots.
+**Config roots.** Config is read from `analysis_options.yaml` under a `dmetrics:` key. Each analyzed file's **config root** is the nearest ancestor directory containing an `analysis_options.yaml` with that key (or the package root if none has it, using built-in defaults). This lookup is per file and identical whether the file was named explicitly or discovered under a directory, so both paths yield the same measurement and the same policy. `--config <path>` forces a single root for the whole run. A monorepo run therefore naturally has several roots.
 
 Two classes of setting, with different scoping:
 
@@ -539,7 +539,7 @@ Precedence within a root, highest first:
 
 Globs match the file's path **relative to its config root** with `package:glob` semantics; the run-root-relative `path` used for identity and reporting is never what a glob sees, so a package's config matches the same files regardless of where the run was started. `overrides` may change **thresholds and enablement only**; a run-global key inside `overrides` is a config error (exit 2).
 
-**Suppressions.** `// ignore: metra_cyclomatic` on the line immediately before a scope's declaration (the line before its metadata, if any; a doc comment in between breaks the adjacency), or as a trailing comment on the declaration's first line; `// ignore_for_file: metra_cyclomatic` anywhere in the file. `// ignore: metra` suppresses all metrics for that scope; other names in the same comment (`// ignore: unused_element, metra_cyclomatic`) are ignored, as the analyzer does. Comments are taken from the token stream, so text inside string literals never matches. A line ignore applies only to the **outermost** measured scopes starting on that line, so a suppression on a method does not suppress its closures, not even a closure on the method's first line; to suppress a closure, put the ignore on the closure's own line. Suppressed results are reported as in §7.3. (Inline suppressions vs. agent-authored code is under review — see §9 — but ship as specced.)
+**Suppressions.** `// ignore: dmetrics_cyclomatic` on the line immediately before a scope's declaration (the line before its metadata, if any; a doc comment in between breaks the adjacency), or as a trailing comment on the declaration's first line; `// ignore_for_file: dmetrics_cyclomatic` anywhere in the file. `// ignore: dmetrics` suppresses all metrics for that scope; other names in the same comment (`// ignore: unused_element, dmetrics_cyclomatic`) are ignored, as the analyzer does. Comments are taken from the token stream, so text inside string literals never matches. A line ignore applies only to the **outermost** measured scopes starting on that line, so a suppression on a method does not suppress its closures, not even a closure on the method's first line; to suppress a closure, put the ignore on the closure's own line. Suppressed results are reported as in §7.3. (Inline suppressions vs. agent-authored code is under review — see §9 — but ship as specced.)
 
 **Golden.** `test/golden/report.json` is the rendering of `test/golden/src/lib/src/parser.dart` (a source built to reproduce the specimen's numbers: 13, six `case` arms, two `when`, three `if`, one `??`, one closure). The golden test also parses the §7.3 specimen straight out of this file and asserts that the rendered report has exactly its key structure, so editing the specimen without the reporter (or vice versa) fails the build. Regenerate with `UPDATE_GOLDENS=1 dart test test/report/json_golden_test.dart`.
 
@@ -559,7 +559,7 @@ Globs match the file's path **relative to its config root** with `package:glob` 
 ## 9. Open questions
 
 - **Inline suppressions vs. agent-authored code (tracking — no change yet).** `// ignore:` assumes a human making a considered judgment; an agent under "make it pass" pressure can add one as easily as fixing the code, and it hides in a large diff. Candidate direction if this bites: drop inline suppressions, centralize all exceptions in reviewable config (baseline for legacy, path globs, named `overrides: {qualified_name: threshold}` for the rare genuine case), and have reporters surface active-override counts as a tracked number. The §7.3 rule that suppressions are always reported and counted is the first step in that direction regardless. Decision deferred to after M4.
-- **Name.** `metra` is a placeholder. (Waterfowl convention is taken by work — but a personal convention could start here.)
+- **Name.** `dmetrics` is a placeholder. (Waterfowl convention is taken by work — but a personal convention could start here.)
 - **Baseline matching.** A v2 problem, deliberately not designed here. Inputs it will have: stable `id` for named scopes, ordinal-based `id` plus `fingerprint` for closures, spans. Known tension: an edited closure changes its fingerprint, and an inserted closure changes later ordinals, so the matcher will need a heuristic (parent + nearest ordinal + fingerprint similarity), not a key lookup. Constraint now: `id` stays opaque to reporters; the fingerprint algorithm may change until the baseline ships. Note that `id` embeds a run-root-relative path, so the baseline will store paths relative to its own location and normalize on load.
 - **Null-aware collection elements and initializer-level branches.** Both decided conservatively in §6.1 (0 / ignored) and flagged for M4 review with real code.
 - **First resolved metric.** Import-graph coupling per library is the cheapest (may not even need full element resolution — directive-level analysis might suffice, which would be a nice middle pipeline). Alternatives: CBO per class, dependency cycles. Decide at spike time.

@@ -1,20 +1,28 @@
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 import 'package:test/test.dart';
 
 void main() {
   final metrics = [CyclomaticMetric()];
   LoadedConfig? load(String yaml, {String source = 'analysis_options.yaml'}) =>
-      parseMetraConfig(yaml, source: source, metrics: metrics);
+      parseDmetricsConfig(yaml, source: source, metrics: metrics);
 
-  group('parseMetraConfig', () {
-    test('no metra section: not a config root', () {
+  group('parseDmetricsConfig', () {
+    test('thresholds: none opts out of the built-in default', () {
+      final c = load(
+        'dmetrics:\n  metrics:\n    cyclomatic: {thresholds: none}\n',
+      )!;
+      expect(c.problems, isEmpty);
+      expect(c.root.metrics['cyclomatic']!.threshold, Threshold.none);
+    });
+
+    test('no dmetrics section: not a config root', () {
       expect(load('linter:\n  rules: [x]\n'), isNull);
       expect(load(''), isNull);
       expect(load('# only a comment\n'), isNull);
     });
 
     test('empty section: a root with defaults', () {
-      final c = load('metra:\n')!;
+      final c = load('dmetrics:\n')!;
       expect(c.problems, isEmpty);
       expect(c.runValues, isEmpty);
       expect(c.root.source, 'analysis_options.yaml');
@@ -24,7 +32,7 @@ void main() {
 
     test('the full shape', () {
       final c = load('''
-metra:
+dmetrics:
   fail_on: warn
   closure_rollup: include_in_parent
   include: ['lib/**', 'bin/**']
@@ -84,7 +92,7 @@ metra:
     });
 
     test('invalid YAML is a problem with a position', () {
-      final c = load('metra:\n  metrics: [\n')!;
+      final c = load('dmetrics:\n  metrics: [\n')!;
       expect(c.problems, hasLength(1));
       expect(c.problems.single.message, contains('invalid YAML'));
       expect(c.problems.single.source, 'analysis_options.yaml');
@@ -93,7 +101,7 @@ metra:
 
     test('problems: unknown keys, metrics, settings, bad values', () {
       final c = load('''
-metra:
+dmetrics:
   fail_on: maybe
   closure_rollup: nope
   bogus: 1
@@ -114,7 +122,9 @@ metra:
         contains('`include` must be a list'),
         contains('unknown metric `cognitive`'),
         contains('`enabled` must be true or false'),
-        contains('`thresholds` must be'),
+        contains(
+          '`thresholds` must be `{warn: n, fail: m}` with n <= m, or `none`',
+        ),
         contains('`count_case_arms` must be a boolean'),
         contains('unknown setting `no_such_knob`'),
       ]);
@@ -126,7 +136,7 @@ metra:
 
     test('a run-global key inside overrides is a config error', () {
       final c = load('''
-metra:
+dmetrics:
   overrides:
     - paths: ['test/**']
       metrics:
@@ -169,7 +179,7 @@ metra:
       final r = resolveRun(
         roots: {
           'a': root('a/analysis_options.yaml', '''
-metra:
+dmetrics:
   fail_on: warn
   metrics:
     cyclomatic: {count_null_coalescing: false}
@@ -190,9 +200,9 @@ metra:
       'two roots disagreeing on a run-global key is an error naming both',
       () {
         final roots = {
-          'a': root('a/analysis_options.yaml', 'metra:\n  fail_on: warn\n'),
-          'b': root('b/analysis_options.yaml', 'metra:\n  fail_on: fail\n'),
-          'c': root('c/analysis_options.yaml', 'metra:\n  fail_on: warn\n'),
+          'a': root('a/analysis_options.yaml', 'dmetrics:\n  fail_on: warn\n'),
+          'b': root('b/analysis_options.yaml', 'dmetrics:\n  fail_on: fail\n'),
+          'c': root('c/analysis_options.yaml', 'dmetrics:\n  fail_on: warn\n'),
         };
         final r = resolveRun(roots: roots, metrics: metrics);
         expect(r.problems, hasLength(1));
@@ -255,7 +265,7 @@ metra:
       final r = resolveRun(
         roots: {
           'a': root('a/analysis_options.yaml', '''
-metra:
+dmetrics:
   metrics:
     cyclomatic: {thresholds: {warn: 1, fail: 2}}
   overrides:

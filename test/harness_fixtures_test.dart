@@ -3,7 +3,7 @@ import 'dart:io';
 import 'harness/dummy_metrics.dart';
 import 'harness/harness.dart';
 
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 
 void main() {
   testFixtures(

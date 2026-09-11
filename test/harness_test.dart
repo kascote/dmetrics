@@ -1,4 +1,4 @@
-import 'package:metra/metra.dart';
+import 'package:dmetrics/dmetrics.dart';
 import 'package:source_span/source_span.dart' as ss;
 import 'package:test/test.dart';
 

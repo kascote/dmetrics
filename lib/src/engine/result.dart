@@ -12,6 +12,10 @@ class Threshold {
 
   const Threshold({required this.warn, required this.fail});
 
+  /// Config value for "no thresholds": overrides a metric's built-in
+  /// default. Never reaches a result; the pipeline maps it to null.
+  static const none = Threshold(warn: double.infinity, fail: double.infinity);
+
   Verdict evaluate(num value) {
     if (value >= fail) return Verdict.fail;
     if (value >= warn) return Verdict.warn;
