@@ -1,0 +1,17 @@
+include: package:lints/recommended.yaml
+
+analyzer:
+  exclude:
+    # Annotated fixture files are inputs to the metrics engine, not code to lint.
+    # Some are deliberately invalid to exercise partial-parse behavior.
+    - test/fixtures/**
+    - test/harness/fixtures/**
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    - prefer_final_locals
+    - unawaited_futures

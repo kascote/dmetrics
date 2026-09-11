@@ -1,0 +1,511 @@
+# Dart Code Metrics Engine — High-Level Spec
+
+**Status:** Draft 0.5 · **Owner:** Nelson · **Date:** 2026-09-10
+**Working name:** TBD (placeholder: `metra`)
+
+**Changes in 0.5:** nested roll-up invariant corrected to use children's aggregated values (`value = measured + Σ(child.value − 1)`, cyclomatic-specific) with a three-level fixture; file identity made report-wide (run-root-relative) and separated from the config-root-relative path used for glob matching; deterministic collision fallback for duplicate named declarations in recovered source; JSON `parent` defined as the nearest enclosing scope emitted in the report; cyclomatic counting made explicitly independent of pipeline selection.
+
+**Changes in 0.4:** structural file/class contexts introduced so every node has a context and scope-opening nodes have a home; metrics declare which scope kinds they measure; scope span now covers the whole declaration (metadata, parameters, initializers, body); multiple config roots reconciled with run-global counting knobs; scope identity narrowed to "deterministic and unique within a report" with declaration kind included, baseline matching deferred; JSON specimen made internally consistent with a stated invariant and deterministic ordering; aggregated results link to the child results they include; hide-children knob removed; counting-table holes closed (`on T` without `catch`, untyped binding arms, syntactic irrefutability rule, `switch` contributor kind); consumer 3 reworded to editor integration.
+
+**Changes in 0.3:** consumption model reframed from "real-time checker" to "post-edit analysis, invoked like `dart analyze`"; traversal contract made explicit; roll-up moved from reporter policy to engine aggregation; counting rules expanded into a decision table; invalid-source contract and exit codes defined; JSON specimen added; I/O seam separated from the engine; config precedence and suppression matching specified; nesting probe added to M1.
+
+---
+
+## 1. Idea
+
+A Dart-native static metrics engine that parses a codebase once, traverses each file's AST once, and feeds a set of pluggable metrics consuming that single traversal synchronously. The first metric is cyclomatic complexity; the architecture is designed so that further metrics (cognitive complexity, nesting depth, LOC, parameter counts, …) slot in without new traversal passes or duplicated scope logic.
+
+Library-first: the core exposes `analyze(sources, metrics, config) → report` as a pure Dart API over in-memory sources, with no file-system opinions. A thin I/O layer (discovery, reading, config lookup) and a CLI sit on top. This keeps the door open for an analyzer-plugin frontend and for embedding the engine in other tooling later.
+
+Two framing decisions shape the roadmap:
+
+1. **The primary consumer is a coding agent, and it runs the tool the way it runs `dart analyze`: after a unit of work is done, over a file or a directory, to get one consolidated report.** This is _not_ a real-time checker. An LLM acts on a complete report at a decision point; a stream of interim results over half-edited code is noise it cannot use and invites "fix the number" churn mid-edit. So: no watch mode, no daemon, no LSP in the critical path. The latency target is "a routine step in the agent's workflow", comparable to `dart analyze`, not "interactive". Editor integration for humans is demoted to reviewer tooling, later.
+2. **Syntactic metrics are the beginning, not the end.** Per-file complexity metrics are job-level checks; project-maintainability metrics (coupling, dependency structure, instability) require _resolved_ analysis and are an explicit roadmap destination. v1 does not implement resolution, but every interface is designed so the resolved pipeline is additive, not a rewrite (see §5).
+
+## 2. Goals
+
+- **G1 — Correct cyclomatic complexity for modern Dart.** Full coverage of Dart 3 constructs: switch expressions, patterns (incl. logical-or/and, relational, object, typed wildcards, untyped bindings), `when` guards, `if-case`, collection `if`/`for` elements, null-aware operators, and null-aware collection elements (`?x`, Dart 3.8+). Every construct has an explicit counted/not-counted decision in §6; "not mentioned" is never a valid state.
+- **G2 — Single-pass, multi-metric engine.** One driver visitor broadcasting node and scope events to N passive metric consumers, synchronously, in traversal order. Adding a metric must not add an AST traversal. (Post-traversal finalization over collected data, e.g. graph algorithms for dependency metrics, is explicitly permitted; see §5.1.)
+- **G3 — Engine-owned scope model.** The engine alone decides what a scope is and maintains the context stack: structural contexts (file, class) and measured scopes (methods, getters/setters, constructors, closures, local functions). Metrics receive `ScopeContext` and declare which kinds they measure. Closure roll-up is an engine aggregation policy applied _before_ thresholds, not per-metric logic and not a reporter concern (see §6.3).
+- **G4 — Uniform result model.** Every metric emits a per-scope `Measurement` (value + contributors); the engine turns it into a `MetricResult` (value, verdict, suppression, threshold, included children) so reporters are metric-agnostic.
+- **G5 — Opinionated defaults, minimal knobs.** Counting semantics are uniform across a run. The two knobs in §6.2 exist because respected tools disagree; a disagreement alone does not create a knob (see §4). Thresholds and enablement can vary by path glob, by config root, and via `// ignore:` suppressions; measurement semantics cannot.
+- **G6 — Executable spec via annotated fixtures.** Every row of the counting table in §6.1 has at least one annotated Dart fixture (`// expect: cyclomatic=4`), doubling as regression test and documentation.
+- **G7 — Fast on syntactic metrics.** Use `parseFile()`-level parsing (no resolution) whenever the requested metric set allows it. Benchmark hypothesis, to be measured at M4 under defined conditions (cold AOT process, config discovery, parsing, analysis, JSON serialization to stdout, all included): a single 2k-LOC file in well under one second; a ~50k-LOC package in low single-digit seconds.
+- **G8 — Agent-first ergonomics.** One command, `metra analyze [targets…] --json`, over any mix of files and directories, mirroring `dart analyze`. JSON output includes a _contributor breakdown_ (which constructs produced the score, with spans) so an LLM gets an actionable refactor hint, not just a verdict. Analysis failures (parse errors, unreadable files, bad config) are never confusable with a clean report: distinct exit code, distinct status field (see §7.2).
+- **G9 — Resolved-ready interfaces.** Coupling/dependency metrics are a committed future, so the interfaces already carry: `MetricRequirements { syntactic | resolved }`, structural class/file contexts today and `library` reserved, per-metric `measures` so new scope kinds never leak into old metrics, a structured `detail` slot, a run-level `finish` hook, and engine-side pipeline selection. Adding the resolved pipeline must not change any existing metric, and existing reporters must keep producing a useful generic rendering of new result types.
+
+## 3. Non-goals
+
+- **N1 — Not a linter.** No style rules, no auto-fixes. Metrics only.
+- **N2 — No resolved-AST _implementation_ in v1 — but it is on the radar, not dropped.** Coupling, inheritance depth, dependency/instability metrics, dead-code detection all need `AnalysisContextCollection` and are the higher-value maintainability play long-term. v1 ships syntactic-only, but the interface commitments in §5.1 are binding now precisely so this lands later without rework.
+- **N3 — No third-party plugin system.** Metrics are compiled in. Revisit only if the tool goes public.
+- **N4 — Not a real-time checker; no watch mode, no daemon, no editor/LSP integration in v1.** The consumer is an agent invoking a batch command at a decision point (§7). Humans use the same console output. Editor integration (CodeLens `CC 12` as _reviewer_ tooling) is a v3+ item; the library seam exists so it can be an adapter rather than a rewrite.
+- **N5 — No historical tracking / dashboards.** JSON output is the interchange point; trend analysis is someone else's job. (The v2 baseline file is a diff against a snapshot, not a history.)
+- **N6 — No per-scope semantic overrides.** A given construct either counts as a branch everywhere in a run or nowhere. Non-negotiable for score comparability.
+
+## 4. Prior art
+
+| Tool / source                                     | What to take from it                                                                                                                                                          |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **dart_code_metrics** (pre-DCM OSS)               | The reference Dart implementation. Mine its construct list, visitor structure, and edge-case handling for cyclomatic complexity. Note where its counting differs from others. |
+| **SonarSource — Cognitive Complexity whitepaper** | The spec for metric #2. Also a model of how to _document_ counting rules precisely.                                                                                           |
+| **Lizard**                                        | Multi-language CC tool; useful as a cross-check oracle on shared constructs and for its pragmatic "count what induces branches" stance.                                       |
+| **ESLint `complexity` rule**                      | Decades of issue-tracker pressure shaped its config surface; shows which knobs users actually demanded in a C-family language.                                                |
+| **Dart SDK analyzer & linter**                    | `RecursiveAstVisitor` API, `// ignore:` suppression conventions, `analysis_options.yaml` config shape, and the annotated-fixture testing pattern used by the analyzer team.   |
+| **McCabe (1976)**                                 | The original edges−nodes+2 definition; grounding for why branch-counting is an equivalent shortcut on structured code.                                                        |
+
+Research task before M2: build a comparison table of counting decisions across dart_code_metrics, SonarQube, Lizard, and ESLint. The table _informs_ the decisions in §6.1; it does not generate knobs. A disagreement becomes a knob only if the M4 field trial shows real codebases need both conventions (M4 rule: bug-first, knob-second). Until then, §6.2 is the complete knob list.
+
+## 5. Architecture outline
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Consumers    agent (post-edit) │ CI │ human console │
+├─────────────────────────────────────────────────────┤
+│ CLI (thin)   metra analyze [files|dirs] [--json]    │
+├─────────────────────────────────────────────────────┤
+│ I/O layer    discovery (globs, excludes, *.g.dart)  │
+│              config-root lookup, file reading       │
+├─────────────────────────────────────────────────────┤
+│ Reporters    console │ json (w/ contributor detail) │
+├─────────────────────────────────────────────────────┤
+│ Engine (pure, in-memory sources in → report out)    │
+│  · pipeline select: syntactic (v1) │ resolved (vN)  │
+│  · driver visitor → event broadcast                 │
+│  · context stack (file, class, scopes)              │
+│  · aggregation (roll-up) → suppression → thresholds │
+│  · run-level finish (graph metrics, later)          │
+├─────────────────────────────────────────────────────┤
+│ Metrics (passive consumers)                         │
+│  · cyclomatic (v1) · cognitive (v2) · coupling (vN) │
+├─────────────────────────────────────────────────────┤
+│ package:analyzer                                    │
+│  · parseString/parseFile (v1) · AnalysisContext (vN)│
+└─────────────────────────────────────────────────────┘
+```
+
+### 5.0 Core interfaces
+
+```dart
+/// Engine input: the engine never touches the file system.
+class SourceFile {
+  final String path;       // run-root-relative, forward slashes; report-wide file identity, used in ids
+  final String content;
+  final String configRoot; // run-root-relative directory of this file's config group (§8);
+                           // globs match `path` relative to `configRoot`, never `path` itself
+}
+
+enum ScopeKind {
+  // Structural contexts: always present, never measured in v1.
+  file, class_,
+  // Measured scopes.
+  function, method, getter, setter, operator, constructor, localFunction, closure,
+  // Reserved for the resolved pipeline.
+  library,
+}
+
+abstract class Metric {
+  String get id;                          // e.g. 'cyclomatic'
+  MetricRequirements get requirements;    // syntactic | resolved
+  Set<ScopeKind> get measures;            // cyclomatic: the eight measured kinds above
+
+  // Scope lifecycle. The engine emits these ONLY for kinds in `measures`, so a
+  // metric never sees a scope kind it did not opt into — adding `class_` or
+  // `library` measurements later cannot change this metric's output.
+  // Bracketed: every onEnterScope has exactly one onExitScope.
+  void onEnterScope(ScopeContext ctx);
+  Measurement onExitScope(ScopeContext ctx);
+
+  // Node events, pre-order enter / post-order exit, source order, for EVERY
+  // node in the file. `ctx` is the innermost open context of any kind
+  // (structural or measured) and is never null.
+  void onEnterNode(AstNode node, ScopeContext ctx);
+  void onExitNode(AstNode node, ScopeContext ctx);
+
+  // Roll-up hook (see §6.3). Called only when the run's policy asks for
+  // aggregation. Default implementation: return `parent` unchanged.
+  Measurement rollUp(Measurement parent, List<Measurement> children);
+
+  // Run-level finalization, after every file has been traversed. Syntactic
+  // metrics return nothing; graph-based resolved metrics emit here.
+  Iterable<Measurement> finish(RunContext ctx);
+}
+
+class ScopeContext {
+  final ScopeId id;             // opaque; deterministic and unique within a report (§7.3)
+  final ScopeKind kind;
+  final ScopeContext? parent;   // nearest enclosing context; null only for `file`
+  final SourceSpan span;        // the whole declaration: metadata through body
+  final String qualifiedName;   // display only: C.m / C.m.<closure#1> / C.field.<closure#1>
+  final bool partial;           // true if the enclosing file had parse errors
+}
+
+/// What a metric produces for one scope.
+class Measurement {
+  final String metricId;
+  final ScopeId scope;
+  final num value;
+  final List<Contributor> contributors;   // complete list; reporters may truncate
+  final Object? detail;                   // reserved: structured payloads (edges, cycles)
+}
+
+class Contributor {
+  final String kind;         // stable vocabulary from §6.1
+  final num increment;
+  final SourceSpan span;
+}
+
+/// What the engine emits after aggregation, suppression and thresholds.
+class MetricResult {
+  final Measurement measurement;      // as measured, always preserved
+  final num value;                    // the value verdicts apply to (after roll-up)
+  final List<ScopeId> includes;       // child results folded into `value`; empty unless rolled up
+  final Threshold? threshold;         // the one that applied, after overrides
+  final Verdict verdict;              // ok | warn | fail
+  final Suppression? suppressed;      // non-null when an ignore applies
+}
+```
+
+**Metric lifetime.** One instance per metric per run. The engine guarantees scope events are properly nested and bracketed, so a metric keeps per-scope state in a stack or a map keyed by `ScopeId`, created on `onEnterScope` and consumed on `onExitScope`. Node events that arrive while no measured scope is open (e.g. a `?:` in a field initializer, delivered with a `class_` context) are simply ignored by a metric that does not measure that kind. Metrics must not keep cross-file state unless they are resolved/run-level metrics that emit from `finish`; this is what makes isolate-parallelism a later drop-in.
+
+### 5.0.1 Traversal lifecycle example
+
+For this source:
+
+```dart
+class C {
+  void m(int a) {
+    if (a > 0) {
+      list.forEach((x) { if (x) f(); });
+    }
+  }
+}
+```
+
+a metric with `measures = {method, closure, …}` observes, in order:
+
+```
+[file context lib/c.dart]                              structural: no scope events
+  onEnterNode  CompilationUnit        ctx=file
+  onEnterNode  ClassDeclaration       ctx=file
+  [class context C]                                    structural: no scope events
+    onEnterNode  MethodDeclaration    ctx=C            ← the opening node belongs to the enclosing context
+    onEnterScope C.m                                   ← method ∈ measures
+      onEnterNode  FormalParameterList ctx=C.m         ← parameters, metadata, initializers: inside the scope
+      onEnterNode  BlockFunctionBody   ctx=C.m
+      onEnterNode  IfStatement         ctx=C.m
+        onEnterNode  FunctionExpression ctx=C.m        ← closure node itself: parent scope
+        onEnterScope C.m.<closure#1>
+          onEnterNode  IfStatement     ctx=C.m.<closure#1>
+          onExitNode   IfStatement     ctx=C.m.<closure#1>
+        onExitScope  C.m.<closure#1>   → Measurement(cyclomatic=2)
+        onExitNode   FunctionExpression ctx=C.m
+      onExitNode   IfStatement         ctx=C.m
+      …
+    onExitScope  C.m                   → Measurement(cyclomatic=2)
+    onExitNode   MethodDeclaration     ctx=C
+  onExitNode   ClassDeclaration       ctx=file
+  onExitNode   CompilationUnit        ctx=file
+```
+
+Rules this fixes:
+
+- **Every node has a non-null context.** The file context is the root; class bodies open a `class_` context. Structural contexts never receive scope events and never produce measurements in v1; they exist so that scope-opening nodes, imports, field declarations and their initializers all have a home. A field-initializer closure's parent chain is `closure → class_ → file`.
+- **The node that _opens_ a scope** (`MethodDeclaration`, `FunctionExpression`, `FunctionDeclaration`, `ConstructorDeclaration`, …) is delivered to the **enclosing** context on enter and exit. **All of its children** — metadata, name, type parameters, formal parameters, constructor initializer list, redirect, body — are delivered to the new scope. A parameter-count metric therefore sees parameters inside the scope it measures; constructor initializer-list branches belong to the constructor.
+- While a child scope is open, the enclosing context receives **no** node events. Parent state is untouched until the child exits.
+- `onExitScope` returns the child's measurement before the parent continues. Roll-up (if any) is applied by the engine after the parent's own `onExitScope`, via `rollUp(parent, children)`, where `children` are the measured scopes whose nearest measured ancestor is this scope.
+- Traversal order is the analyzer's `visitChildren` order, which is source order. Both `onEnterNode` and `onExitNode` fire for every node; metrics ignore what they don't need.
+- `ScopeKind.class_` and `file` become measurable (for future class/library metrics) purely by a new metric listing them in `measures`. Existing metrics are unaffected by construction.
+
+### 5.1 Resolved pipeline — binding interface commitments
+
+The resolved pipeline is not implemented in v1, but these decisions are made _now_ so that coupling/dependency metrics arrive as additions, not amendments:
+
+- **Pipeline selection is engine-internal, and there is exactly one pipeline per run.** Callers pass a metric set; if every metric is `syntactic`, the engine parses without resolution. If any metric is `resolved`, the engine runs the resolved pipeline and _all_ metrics consume its ASTs — syntactic metrics run unchanged over resolved ASTs (that's the compatibility test). Never parse twice.
+- **One AST traversal per file; post-traversal finalization is allowed.** Dependency cycles and instability are properties of a graph collected across files. Resolved metrics accumulate during traversal and compute in `finish(RunContext)`. "No additional traversal" constrains AST walks, not algorithms over collected data.
+- **Scope granularity widens, the result model doesn't.** Coupling/instability are per-class and per-library. `class_` is already a context; `library` is reserved. A resolved metric lists them in `measures`; no reporter may assume scopes are function-shaped.
+- **The event model gains, never mutates.** Resolved metrics receive the same events plus a `ResolvedContext` accessor on `RunContext`/`ScopeContext` (element model, library graph).
+- **`detail` carries structure; reporters degrade gracefully.** Dependency metrics will report edges and cycles in `detail`. The v1 JSON reporter serializes `detail` generically (any JSON-encodable value). The console reporter renders `value` + verdict for any metric and a specialized block only for detail types it knows. Adding a metric with a new `detail` shape must not break either reporter; making it _pretty_ in the console is that metric's job.
+- **Cost honesty.** Resolution is slower and memory-hungry. A single-file target with syntactic metrics must never pay resolution cost. Resolved metrics are a repo-mode / CI concern — which fits, since that's where maintainability questions get asked.
+
+### 5.2 I/O seam
+
+`analyze()` takes `List<SourceFile>` and the resolved per-root `Config`s. Everything that touches the disk lives in `src/io/`: target expansion (files and directories, globs, excludes, `*.g.dart` and `*.freezed.dart` skipped by default), reading, and config-root lookup (§8). A convenience `analyzePaths(targets, …)` composes the two. Tests drive the engine with in-memory sources; the I/O layer has its own small tests.
+
+## 6. v1 counting rules (cyclomatic)
+
+Base score 1 per measured scope. The table below is the complete decision list; every row has a fixture. The guiding convention for the null-aware family: **count a construct when the author wrote both paths** (`??` has a right operand; `?.` short-circuits to nothing). This is a documented cyclomatic variant, not McCabe over the full runtime CFG.
+
+**Irrefutability is decided syntactically in v1.** A pattern is _irrefutable_ iff it is a bare wildcard `_`, an untyped variable pattern (`var x`, `final x`), or a parenthesized irrefutable pattern. Every other pattern — constants, typed wildcards `int _`, typed bindings `int x`, object, record, list, map, relational, null-check, null-assert — is treated as a test that can fail, regardless of what the scrutinee's static type would say. This convention is a property of the cyclomatic metric, **not of the pipeline**: the resolved pipeline must produce identical cyclomatic scores for identical source. Adding a resolved metric to a run must never change an existing metric's numbers. Any future change to counting is an explicit, versioned metric-policy decision (bumping `schemaVersion` and the metric's documented policy), never a side effect of resolution being available.
+
+### 6.1 Decision table
+
+| Construct                                                     | Δ                   | Contributor kind | Notes                                                                                        |
+| ------------------------------------------------------------- | ------------------- | ---------------- | -------------------------------------------------------------------------------------------- |
+| `if` statement                                                | +1                  | `if`             | `else if` is an `if`: +1. Bare `else`: 0.                                                    |
+| `if-case` statement (`if (x case P)`)                         | +1                  | `if-case`        | Counts once, not `if` + pattern. Its `when` guard counts separately.                         |
+| `for`, `for-in`, `await for`, `while`, `do-while`             | +1 each             | `loop`           | `for (;;)` with no condition still +1: uniformity over CFG purity.                           |
+| `switch` statement / expression                               | 0 (default)         | `switch`         | Arms count; see next rows. With `count_case_arms=false`: +1 per switch (kind `switch`), arms 0. |
+| `case` arm with a refutable pattern                           | +1 each             | `case`           | Constants, typed wildcards (`int _`), typed bindings, object/record/list/map, relational.    |
+| `default` arm, bare `_` arm, untyped binding arm (`case var x`) | 0                 | —                | Irrefutable. Exhaustive switches without a wildcard get no adjustment.                       |
+| Grouped labels (`case 1: case 2:` sharing a body)             | +1 per label        | `case`           | Same as separate arms.                                                                       |
+| `when` guard (switch arm or `if-case`)                        | +1 each             | `when`           |                                                                                              |
+| Logical-or pattern `P1 \|\| P2 \|\| P3`                       | +1 per extra alt.   | `pattern-or`     | At any nesting depth (`Foo(x: 1 \|\| 2)` counts). The arm itself still counts once.          |
+| Logical-and pattern `P1 && P2`                                | 0                   | —                | Both must match; failure goes to the same place. Part of the arm's single test.              |
+| `catch (e)`, `on T catch (e)`, `on T` without `catch`         | +1 each             | `catch`          | One per clause, binding or not. `try`, `finally`, `rethrow`: 0.                              |
+| Conditional expression `c ? a : b`                            | +1                  | `ternary`        |                                                                                              |
+| `&&`, `\|\|`                                                  | +1 each             | `&&`, `\|\|`     |                                                                                              |
+| `??`, `??=`                                                   | +1 each             | `??`, `??=`      | Knob `count_null_coalescing`.                                                                |
+| `?.`, `?..`, `?[]`, `!`                                       | 0                   | —                | No authored alternative path.                                                                |
+| Collection `if` element (incl. `if-case` element)             | +1                  | `if`/`if-case`   | `else` element: 0.                                                                           |
+| Collection `for` element                                      | +1                  | `loop`           |                                                                                              |
+| Null-aware collection element `?x`, `?k: v` (Dart 3.8+)       | 0                   | —                | Aligned with `?.`: elided, no alternative. **Revisit at M4** if it hides real branching.     |
+| Spread `...`, null-aware spread `...?`                        | 0                   | —                |                                                                                              |
+| `assert`                                                      | 0                   | —                | Not production control flow.                                                                 |
+| `return`, `break`, `continue`, `throw`, `yield`, `await`      | 0                   | —                |                                                                                              |
+| Labels, cascades `..`, recursion                              | 0                   | —                |                                                                                              |
+| Closure / local function inside a scope                       | own scope           | —                | Never contributes to the parent's measurement; roll-up is an aggregation step (§6.3).        |
+
+**Invariant, asserted by the harness for every measured scope:** `measured == 1 + Σ contributors.increment`.
+
+**Scopes measured.** Methods, getters, setters, operators, constructors (the whole declaration including initializer list; a constructor with a `;` body but an initializer list is still measured), top-level functions, local functions, closures (function expressions, wherever they appear — including in field and top-level variable initializers, named `C.field.<closure#1>` under the `class_` or `file` context).
+
+**Not measured.** Abstract, external, and redirecting-factory declarations (no body: no scope emitted, not score 1). Branch constructs directly inside field / top-level variable initializers (outside any closure) are delivered with a structural context and therefore **ignored in v1** — a documented gap, revisited if M4 finds `late final x = cond ? a : b` patterns that matter.
+
+### 6.2 Knobs (complete list)
+
+- `count_null_coalescing` (default: `true`) — Lizard counts `??`, SonarQube's cyclomatic does not.
+- `count_case_arms` (default: `true`; `false` = +1 per switch) — the classic McCabe-vs-modified disagreement.
+
+Both are **run-global** (§8). `closure_rollup` is not a counting knob; it is an aggregation policy (§6.3).
+
+### 6.3 Aggregation, suppression, thresholds — in that order
+
+The engine pipeline per file is: **measure scopes → aggregate → suppress → evaluate thresholds → report**. Verdicts are always computed on the value the aggregation policy produced, so a reported number can never disagree with its verdict.
+
+- `closure_rollup: separate` (default) — each scope is its own result; `value == measurement.value`; `includes` is empty.
+- `closure_rollup: include_in_parent` — the engine calls `metric.rollUp(parent, children)` bottom-up, where `children` are the **direct** measured children and each child's `value` is already its own aggregate. Cyclomatic defines it as `parent.measured + Σ(child.value − 1)`: each child's base score is excluded, so a method of 2 with a closure of 3 reports 4, and a method of 2 containing a closure of 2 that itself contains a closure of 2 reports 2 → 3 → 4 at the three levels. The parent result lists its direct folded children in `includes`; the children are **always emitted** with their own results and verdicts, and they count toward the summary and the exit code like any other result. There is no option to hide them: the JSON is the record, and the console reporter decides how much of it to print.
+
+**Aggregated evidence invariant (cyclomatic-specific):** under `include_in_parent`, `value == measured + Σ over includes of (child.value − 1)`, with `includes` holding direct children only. A parent's own `contributors` explain `measured`; following `includes` recursively explains the rest without double-counting descendants. Other metrics define their own `rollUp` and their own invariant. Nothing in a report is a number without a breakdown that reaches it.
+
+Every `MetricResult` preserves the raw `Measurement`, so the JSON carries both the measured and the aggregated value and the policy in effect. Aggregation is per metric (`rollUp` is a metric method): there is no engine-generic "sum"; a future nesting-depth metric defines `max`, a parameter-count metric defines identity.
+
+Class- and file-level aggregates (max, sum, p90) are **not** produced in v1. They will become first-class when class/library metrics exist (§5.1).
+
+## 7. Consumption model
+
+Three consumers, in priority order:
+
+1. **Agent, post-edit.** After finishing a task or a coherent batch of edits, the agent runs `metra analyze <file|dir> --json`, exactly as it would run `dart analyze`, wired via a line in `CLAUDE.md` ("after editing, run `metra analyze` on touched files; keep functions under 10"). The JSON contributor breakdown ("6 case arms, 4 nested ifs, 3 `??`", each with a span) turns a threshold failure into a refactor hint the model can act on. One report per decision point; no streaming, no per-keystroke feedback.
+2. **CI backstop.** Whole-repo run, strict thresholds, exit codes, JSON artifact. The baseline file (recorded existing violations, fail only on new/worsened) is what lets CI be strict on agent-written code without a legacy cleanup crusade — a v2 commitment. Resolved metrics, when they land, live here.
+3. **Editor integration (later).** Humans read the console output from v1. CodeLens-style "CC 14" in an editor, for judging what the agent produced, is nice, not necessary; see N4.
+
+### 7.1 CLI shape
+
+```
+metra analyze [<file>|<dir> ...] [--json] [--config <path>] [--fail-on warn|fail] [--set <key>=<value>]
+```
+
+- No targets: the current directory. Files and directories mix freely. A single-file target does no repo-wide discovery: it reads that file and looks up its config root (§8). Files that don't match the config's include/exclude are still analyzed when named explicitly (same as `dart analyze`).
+- `--json` writes the report in §7.3 to stdout; console output otherwise. Diagnostics and progress never go to stdout in JSON mode.
+- `--set cyclomatic.count_case_arms=false` overrides a run-global knob for the whole run (§8).
+
+### 7.2 Invalid source and exit codes
+
+Parsing uses error recovery (`throwIfDiagnostics: false`) and the latest language version's feature set; per-file `// @dart=` override comments are honored by the parser. Files with syntax errors are still traversed: their scopes are measured from the recovered AST and marked `partial: true`, because a report on the 90% that parsed is still a useful hint. But the run is never clean:
+
+| Exit | Meaning                                                                                    | JSON `status` |
+| ---- | ------------------------------------------------------------------------------------------ | ------------- |
+| 0    | Analysis complete, no verdict at or above `--fail-on`                                      | `ok`          |
+| 1    | Analysis complete, threshold violations present                                            | `violations`  |
+| 2    | Analysis incomplete: parse errors, unreadable files, invalid config, conflicting knobs (§8) | `errors`      |
+| 3    | Usage error (bad flags, no such target)                                                    | —             |
+
+Exit 2 wins over exit 1. `errors` carries a `diagnostics[]` list per file (message, span, severity) so the agent can fix syntax first, then re-run. An empty target set (nothing matched) is exit 0 with zero files — reported explicitly in `summary`, never silent.
+
+### 7.3 JSON report — specimen
+
+The schema is the tool's real public interface; this specimen is a golden test. Coordinates are 1-based line/column, end-exclusive, plus 0-based UTF-16 offsets. All paths (`files[].path`, `configRoot`, `configs[].root`) are relative to the **run root** — the working directory of the invocation, as `dart analyze` reports them — with forward slashes, so a file path is unique within a report even when the run spans several packages.
+
+**Ordering is deterministic:** `configs` by root path; `files` by path (byte order); `scopes` by start offset, then end offset; `contributors` by start offset; `includes` by the child's start offset.
+
+```json
+{
+  "schemaVersion": 1,
+  "tool": { "name": "metra", "version": "0.1.0" },
+  "status": "violations",
+  "configs": [
+    {
+      "root": ".",
+      "source": "analysis_options.yaml",
+      "metrics": {
+        "cyclomatic": {
+          "enabled": true,
+          "thresholds": { "warn": 8, "fail": 12 }
+        }
+      }
+    }
+  ],
+  "run": {
+    "cyclomatic": { "count_null_coalescing": true, "count_case_arms": true },
+    "closure_rollup": "separate",
+    "fail_on": "fail"
+  },
+  "summary": {
+    "files": 1,
+    "filesWithErrors": 0,
+    "scopes": 2,
+    "verdicts": { "ok": 1, "warn": 0, "fail": 1 },
+    "suppressed": 0
+  },
+  "files": [
+    {
+      "path": "lib/src/parser.dart",
+      "configRoot": ".",
+      "status": "ok",
+      "diagnostics": [],
+      "scopes": [
+        {
+          "id": "lib/src/parser.dart::method:Parser.parseExpr",
+          "kind": "method",
+          "name": "parseExpr",
+          "qualifiedName": "Parser.parseExpr",
+          "parent": null,
+          "fingerprint": "b41e07d2",
+          "span": {
+            "start": { "line": 41, "column": 3, "offset": 1180 },
+            "end": { "line": 88, "column": 4, "offset": 2731 }
+          },
+          "partial": false,
+          "results": {
+            "cyclomatic": {
+              "measured": 13,
+              "value": 13,
+              "includes": [],
+              "threshold": { "warn": 8, "fail": 12 },
+              "verdict": "fail",
+              "suppressed": null,
+              "contributors": [
+                { "kind": "case", "increment": 1, "span": { "start": { "line": 44, "column": 7,  "offset": 1240 }, "end": { "line": 44, "column": 18, "offset": 1251 } } },
+                { "kind": "when", "increment": 1, "span": { "start": { "line": 44, "column": 19, "offset": 1252 }, "end": { "line": 44, "column": 31, "offset": 1264 } } },
+                { "kind": "case", "increment": 1, "span": { "start": { "line": 47, "column": 7,  "offset": 1301 }, "end": { "line": 47, "column": 20, "offset": 1314 } } },
+                { "kind": "case", "increment": 1, "span": { "start": { "line": 50, "column": 7,  "offset": 1366 }, "end": { "line": 50, "column": 22, "offset": 1381 } } },
+                { "kind": "if",   "increment": 1, "span": { "start": { "line": 52, "column": 5,  "offset": 1402 }, "end": { "line": 52, "column": 22, "offset": 1419 } } },
+                { "kind": "case", "increment": 1, "span": { "start": { "line": 55, "column": 7,  "offset": 1478 }, "end": { "line": 55, "column": 24, "offset": 1495 } } },
+                { "kind": "when", "increment": 1, "span": { "start": { "line": 55, "column": 25, "offset": 1496 }, "end": { "line": 55, "column": 40, "offset": 1511 } } },
+                { "kind": "if",   "increment": 1, "span": { "start": { "line": 58, "column": 5,  "offset": 1560 }, "end": { "line": 58, "column": 27, "offset": 1582 } } },
+                { "kind": "case", "increment": 1, "span": { "start": { "line": 66, "column": 7,  "offset": 1760 }, "end": { "line": 66, "column": 19, "offset": 1772 } } },
+                { "kind": "??",   "increment": 1, "span": { "start": { "line": 70, "column": 14, "offset": 1868 }, "end": { "line": 70, "column": 16, "offset": 1870 } } },
+                { "kind": "case", "increment": 1, "span": { "start": { "line": 74, "column": 7,  "offset": 1951 }, "end": { "line": 74, "column": 21, "offset": 1965 } } },
+                { "kind": "if",   "increment": 1, "span": { "start": { "line": 80, "column": 5,  "offset": 2140 }, "end": { "line": 80, "column": 30, "offset": 2165 } } }
+              ],
+              "contributorSummary": { "case": 6, "when": 2, "if": 3, "??": 1 }
+            }
+          }
+        },
+        {
+          "id": "lib/src/parser.dart::method:Parser.parseExpr::closure#1",
+          "kind": "closure",
+          "name": "<closure#1>",
+          "qualifiedName": "Parser.parseExpr.<closure#1>",
+          "parent": "lib/src/parser.dart::method:Parser.parseExpr",
+          "fingerprint": "3f9a1c8e",
+          "span": {
+            "start": { "line": 60, "column": 20, "offset": 1610 },
+            "end": { "line": 63, "column": 6, "offset": 1702 }
+          },
+          "partial": false,
+          "results": {
+            "cyclomatic": {
+              "measured": 2,
+              "value": 2,
+              "includes": [],
+              "threshold": { "warn": 8, "fail": 12 },
+              "verdict": "ok",
+              "suppressed": null,
+              "contributors": [
+                { "kind": "if", "increment": 1, "span": { "start": { "line": 61, "column": 7, "offset": 1640 }, "end": { "line": 61, "column": 19, "offset": 1652 } } }
+              ],
+              "contributorSummary": { "if": 1 }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Contract notes:
+
+- **Scope identity vs display name.** `qualifiedName` and `name` are for humans and may shift (`<closure#1>` becomes `<closure#2>` when an earlier closure is inserted). `id` is **deterministic and unique within a report**, nothing more: `path::kind:qualifiedName` for named scopes — `path` is the run-root-relative file path (report-wide unique, so two packages each holding `lib/src/parser.dart` do not collide), and the kind is part of the id because display names collide (constructor `C.foo` vs method `C.foo`; getter `C.x` vs setter `C.x`) — and `parentId::closure#N` for closures, where `N` is the source-order ordinal among the parent's direct closures. **Collision fallback:** recovered invalid source can contain duplicate named declarations; when two named scopes would share an id, the second and later ones get a `#2`, `#3`, … suffix in source order (`path::method:C.m#2`). `id` is opaque to reporters. **Cross-revision matching is a baseline (v2) responsibility, not an identity property**; `fingerprint` (a short hash of the scope's normalized token stream) is recorded as supporting evidence for that future matcher, and v1 promises nothing about it beyond determinism.
+- **Contributors are complete.** The engine records every contributor with its span, and the JSON emits all of them (the specimen above lists all twelve of `parseExpr`'s). Reporters may truncate for display (console shows `contributorSummary` plus the top few); `--json-contributors=summary` drops the list from the JSON when a consumer only wants counts.
+- **Suppressed results are still reported**, with `suppressed: { "kind": "ignore" | "ignore_for_file", "span": … }`, verdict forced to `ok`, and counted in `summary.suppressed`. Suppressions are visible, never silent.
+- **`measured` vs `value` vs `includes`.** Identical values and empty `includes` under `closure_rollup: separate`. Under `include_in_parent`, `value` is the aggregate, `includes` lists the child ids folded in, `verdict` applies to `value`, and the children appear as their own scopes with their own results.
+- **`parent` in JSON** is the id of the nearest enclosing scope **emitted in the report**, or `null`. Structural contexts (file, class) are not serialized, so a method's JSON `parent` is `null` even though its in-engine `ScopeContext.parent` is the class context. Reporters that need the class can read `qualifiedName`.
+- **`configs` vs `run`.** Per-root settings (thresholds, enablement, overrides) live in `configs[]`; each file names its `configRoot`. Run-global settings (counting knobs, roll-up policy, `fail_on`) live once in `run`.
+- **`partial: true`** on a scope means the file had parse errors; the number is a best effort from a recovered AST.
+
+## 8. Initial setup
+
+**Package layout** (single package to start; split only if the CLI grows):
+
+```
+metra/
+  lib/
+    metra.dart              # public API: analyze(), analyzePaths()
+    src/engine/             # driver visitor, context stack, aggregation, thresholds
+    src/metrics/cyclomatic/
+    src/io/                 # discovery, reading, config-root lookup (the only fs code)
+    src/config/
+    src/report/
+  bin/metra.dart            # CLI entry
+  test/
+    fixtures/cyclomatic/    # annotated .dart fixture files, one per §6.1 row minimum
+    engine/                 # context/scope lifecycle tests (in-memory sources)
+    probe/                  # nesting-sensitive probe metric (M1, not shipped)
+  analysis_options.yaml
+```
+
+**Dependencies:** `analyzer`, `args`, `glob`, `source_span`, `test`. Nothing else until it hurts.
+
+**Config roots.** Config is read from `analysis_options.yaml` under a `metra:` key. Each analyzed file's **config root** is the nearest ancestor directory containing an `analysis_options.yaml` with that key (or the package root if none has it, using built-in defaults). This lookup is per file and identical whether the file was named explicitly or discovered under a directory, so both paths yield the same measurement and the same policy. `--config <path>` forces a single root for the whole run. A monorepo run therefore naturally has several roots.
+
+Two classes of setting, with different scoping:
+
+- **Per-root (may differ between roots):** thresholds, metric enablement, `overrides` path-glob blocks, include/exclude patterns.
+- **Run-global (must be identical across roots):** counting knobs (§6.2), `closure_rollup`, `fail_on`. If two roots in one run disagree on a run-global setting, the run is a config error (exit 2, `status: errors`, diagnostic naming both files) unless `--set` fixes the value for the whole run, in which case the CLI value wins everywhere and is reported in `run`.
+
+Precedence within a root, highest first:
+
+1. CLI flags (`--fail-on`, `--threshold cyclomatic=warn:8,fail:12`, `--set …`)
+2. Path-glob `overrides` blocks in that root's config — last matching override wins
+3. That root's top-level config
+4. Built-in defaults
+
+Globs match the file's path **relative to its config root** with `package:glob` semantics; the run-root-relative `path` used for identity and reporting is never what a glob sees, so a package's config matches the same files regardless of where the run was started. `overrides` may change **thresholds and enablement only**; a run-global key inside `overrides` is a config error (exit 2).
+
+**Suppressions.** `// ignore: metra_cyclomatic` on the line immediately before a scope's declaration, or on the declaration's first line; `// ignore_for_file: metra_cyclomatic` anywhere in the file. `// ignore: metra` suppresses all metrics for that scope. A suppression on a method does not suppress its closures. Suppressed results are reported as in §7.3. (Inline suppressions vs. agent-authored code is under review — see §9 — but ship as specced.)
+
+**Testing.** The annotated-fixture harness is the _first_ thing built. Each fixture scope carries `// expect: cyclomatic=N` (and `// expect: cyclomatic=N rolled=M` where roll-up differs, including a three-level method → closure → closure fixture asserting 2/3/4); the harness parses annotations, runs the engine over in-memory sources, asserts per scope, and checks the §6.1 and §6.3 invariants on every result. A fixture with an `// expect: partial` header asserts the invalid-source behavior. Engine tests include a display-name collision fixture (constructor `C.foo` next to method `foo`, getter/setter pair) asserting distinct ids, a recovered-source fixture with a duplicated method asserting the `#2` fallback, a two-package fixture with identical relative paths asserting distinct ids, and multi-root fixtures asserting per-root thresholds and the knob-conflict error. A small oracle script compares selected fixtures against Lizard for cross-validation of shared constructs.
+
+**Milestones:**
+
+1. **M0 — Harness.** Fixture format + test runner working against a hardcoded dummy metric, in-memory sources only.
+2. **M1 — Engine skeleton.** Driver visitor with enter/exit node events, context stack (file, class, measured scopes), `ScopeContext`, `ScopeId`, `measures` filtering, result model, aggregation and threshold stages. Lifecycle tests green: closure-inside-`build`, closure in field initializer (parent chain `closure → class_ → file`), local function in constructor, parameters delivered inside the scope, opening node delivered to the enclosing context. **Includes the nesting probe:** a throwaway metric that tracks nesting depth via node exit and independent per-scope state, asserted on nested-closure fixtures. It never ships; it proves the traversal contract before cyclomatic is built on it.
+3. **M2 — Cyclomatic.** Full §6.1 table, one fixture per row minimum, Dart 3.8 constructs included, invariant checked on every fixture.
+4. **M3 — I/O layer, CLI, reporters.** Discovery, config roots and precedence, run-global conflict detection, suppressions, console + JSON output conforming to the §7.3 specimen (golden test), deterministic ordering, exit codes per §7.2, invalid-source handling.
+5. **M4 — Field trial.** Run on 2–3 real codebases (a large pub package, work monorepo with several config roots); wire into a real Claude Code session via `CLAUDE.md` as a post-edit step; triage every surprising score as bug-first, knob-second; run the G7 benchmark under its stated conditions; revisit the null-aware-element and initializer decisions with data.
+6. **M5 — Metric #2 (cognitive complexity)** as the architecture proof: it must require zero engine changes beyond registration. (M1's probe makes this a confirmation, not a discovery.)
+
+**Radar (post-M5, unscheduled):** baseline file for CI adoption (its matcher consumes `id` and `fingerprint`, §7.3) → resolved-pipeline spike with a first dependency metric (likely import-graph coupling / cycle detection per library, the cheapest resolved win; may need only directive-level analysis) → Martin-style instability/abstractness if the spike holds → editor shell as reviewer tooling. The resolved spike's acceptance test mirrors M5: existing syntactic metrics run unmodified and existing reporters produce a useful rendering of the new results.
+
+## 9. Open questions
+
+- **Inline suppressions vs. agent-authored code (tracking — no change yet).** `// ignore:` assumes a human making a considered judgment; an agent under "make it pass" pressure can add one as easily as fixing the code, and it hides in a large diff. Candidate direction if this bites: drop inline suppressions, centralize all exceptions in reviewable config (baseline for legacy, path globs, named `overrides: {qualified_name: threshold}` for the rare genuine case), and have reporters surface active-override counts as a tracked number. The §7.3 rule that suppressions are always reported and counted is the first step in that direction regardless. Decision deferred to after M4.
+- **Name.** `metra` is a placeholder. (Waterfowl convention is taken by work — but a personal convention could start here.)
+- **Baseline matching.** A v2 problem, deliberately not designed here. Inputs it will have: stable `id` for named scopes, ordinal-based `id` plus `fingerprint` for closures, spans. Known tension: an edited closure changes its fingerprint, and an inserted closure changes later ordinals, so the matcher will need a heuristic (parent + nearest ordinal + fingerprint similarity), not a key lookup. Constraint now: `id` stays opaque to reporters; the fingerprint algorithm may change until the baseline ships. Note that `id` embeds a run-root-relative path, so the baseline will store paths relative to its own location and normalize on load.
+- **Null-aware collection elements and initializer-level branches.** Both decided conservatively in §6.1 (0 / ignored) and flagged for M4 review with real code.
+- **First resolved metric.** Import-graph coupling per library is the cheapest (may not even need full element resolution — directive-level analysis might suffice, which would be a nice middle pipeline). Alternatives: CBO per class, dependency cycles. Decide at spike time.
+- **Resolved-mode incrementality.** `AnalysisContextCollection` cost per run in CI; whether caching/warm contexts are worth it, or whether "resolved = CI-only, cold, minutes are fine" is acceptable. Measure before designing.
+- **Isolate parallelism.** File-level parallelism via isolates is trivially shardable for syntactic metrics given the per-run metric-instance rule in §5.0. Measure first at M4; don't build speculatively.

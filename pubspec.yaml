@@ -1,0 +1,17 @@
+name: metra
+description: A Dart-native static code metrics engine (working name).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  analyzer: ^14.3.0
+  args: ^2.7.0
+  glob: ^2.1.3
+  source_span: ^1.10.1
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.32.0
