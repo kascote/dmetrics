@@ -23,4 +23,5 @@ export 'src/report/ansi.dart';
 export 'src/report/console_reporter.dart';
 export 'src/report/json_reporter.dart';
 export 'src/report/run_result.dart';
+export 'src/report/stats.dart';
 export 'src/version.dart';

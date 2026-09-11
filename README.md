@@ -162,6 +162,7 @@ roots.
 
 ```
 metra analyze [<file>|<dir> ...] [options]
+metra stats   [<file>|<dir> ...] [options]
 ```
 
 No targets means the current directory. Files and directories mix freely.
@@ -170,12 +171,12 @@ them, the same way `dart analyze` behaves.
 
 | Flag                                 | Meaning                                                                                                       |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `--json`                             | Write the JSON report to stdout. Nothing else goes to stdout in this mode.                                    |
-| `--json-contributors full\|summary`  | `summary` drops the per-contributor span list from the JSON report. Default `full`.                           |
-| `--all`                              | Console mode: print every scope, not only `warn`/`fail`/`suppressed`.                                         |
+| `--json`                             | Write the JSON document to stdout. Nothing else goes to stdout in this mode.                                  |
+| `--json-contributors full\|summary`  | `analyze` only. `summary` drops the per-contributor span list from the JSON report. Default `full`.           |
+| `--all`                              | `analyze` only, console mode: print every scope, not only `warn`/`fail`/`suppressed`.                         |
 | `--color auto\|always\|never`        | Console mode. `auto` colors when stdout is a terminal, `NO_COLOR` is unset and `TERM` is not `dumb`.          |
 | `--config <path>`                    | Use one `analysis_options.yaml` as the config root for every file.                                            |
-| `--fail-on warn\|fail`               | Shorthand for `--set fail_on=...`.                                                                            |
+| `--fail-on warn\|fail`               | `analyze` only. Shorthand for `--set fail_on=...`.                                                            |
 | `--set <key>=<value>`                | Fix a run-global setting for the whole run. Repeatable. Keys: `fail_on`, `closure_rollup`, `<metric>.<knob>`. |
 | `--threshold <metric>=warn:N,fail:M` | Force a metric's thresholds in every root, above any `overrides`. Repeatable. Order of `warn`/`fail` is free. |
 | `--help`, `-h`                       | Usage.                                                                                                        |
@@ -195,6 +196,57 @@ dart run bin/metra.dart analyze lib \
   --set cyclomatic.count_case_arms=false \
   --set closure_rollup=include_in_parent
 ```
+
+### Calibrating thresholds: `metra stats`
+
+`metra stats` measures exactly like `analyze` (same targets, config, `--set`,
+`--threshold`) and then, instead of listing findings, prints per metric the
+numbers a threshold decision needs:
+
+```
+cyclomatic • 258 scopes in 26 files
+Distribution
+  1–5      220  85.3%  ████████████████████
+  6–9       22   8.5%  ██
+  10–14     11   4.3%  █
+  15–19      2   0.8%
+  20+        3   1.2%
+  p50 1 • p90 7 • p95 11 • p99 22 • max 37
+Thresholds • warn ≥ 10, fail ≥ 20
+  ≥ warn    16   6.2%
+  ≥ fail     3   1.2%
+Sweep • scopes at or above each candidate
+  ≥ 5       49  19.0%  1 table-shaped
+  ≥ 8       23   8.9%  1 table-shaped
+  ≥ 10      16   6.2%
+  ...
+Contributor mix • share of summed increments
+  if 28.0% • loop 23.8% • case 14.7% • ternary 11.8% • ?? 8.6% • ...
+Sibling clusters • same value and contributor mix, ≥ warn
+  cyclomatic 12 • case ×11 • 3 scopes
+    lib/widgets/a.dart:40 method A.build
+    ...
+```
+
+- **Distribution**: value bands and nearest-rank percentiles. A healthy
+  codebase puts `warn` around the 90th–95th percentile.
+- **Thresholds**: scopes at or above `warn` and `fail`, each counted against
+  its own applied threshold (per-root overrides honored), with how many of
+  those are table-shaped, the built-in false-positive estimate.
+- **Sweep**: the same count for a fixed set of candidates (5, 8, 10, 12, 15,
+  20, 25, 30): "at 15 you would have 5 warns, 2 of them tables".
+- **Contributor mix**: summed increments per contributor kind over the whole
+  run, as a share.
+- **Sibling clusters**: two or more scopes with the same value and the same
+  contributor summary, at or above `warn` (top decile when no threshold is
+  configured). Identical scores with identical breakdowns are usually copies.
+
+Suppressions are ignored: stats describe the code, not the verdicts. Exit
+codes are 0 or 2 (analysis incomplete); violations never make `stats` exit 1.
+`--json` writes a separate document (`schemaVersion`, `tool`, `status`,
+`summary`, `diagnostics`, `metrics.<id>` with `bands`, `percentiles`,
+`thresholds`, `sweep`, `contributorMix`, `siblingClusters`; shares are
+fractions in `[0, 1]`), not the `analyze` report.
 
 ## Suppressions
 

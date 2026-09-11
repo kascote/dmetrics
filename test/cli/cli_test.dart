@@ -36,6 +36,9 @@ void main() {
         ['analyze', '--set', 'novalue'],
         ['analyze', '--threshold', 'cyclomatic=8'],
         ['analyze', '--threshold', 'cyclomatic=warn:9,fail:8'],
+        ['stats', '--all'],
+        ['stats', '--fail-on', 'warn'],
+        ['stats', '--set', 'novalue'],
       ]) {
         final r = run(args);
         expect(r.code, exitUsage, reason: '$args');
@@ -45,8 +48,15 @@ void main() {
     });
 
     test('--help and --version', () {
-      expect(run(['--help']).code, 0);
-      expect(run(['analyze', '-h']).out, contains('Usage:'));
+      final top = run(['--help']);
+      expect(top.code, 0);
+      expect(top.out, contains('$toolName analyze'));
+      expect(top.out, contains('$toolName stats'));
+      expect(
+        run(['analyze', '-h']).out,
+        startsWith('Usage: $toolName analyze'),
+      );
+      expect(run(['stats', '-h']).out, startsWith('Usage: $toolName stats'));
       expect(run(['--version']).out, '$toolName $toolVersion\n');
     });
 
@@ -186,6 +196,62 @@ void main() {
         r.out,
         startsWith('analysis_options.yaml:2:3 • error • unknown key `nope`'),
       );
+    });
+  });
+
+  group('stats', () {
+    test('console output, exit 0 even with violations', () {
+      write('lib/a.dart', fn);
+      write('lib/b.dart', fn.replaceFirst('f(', 'g('));
+      final r = run([
+        'stats',
+        'lib',
+        '--threshold',
+        'cyclomatic=warn:1,fail:2',
+      ]);
+      expect(r.code, 0);
+      expect(r.err, isEmpty);
+      expect(r.out, startsWith('cyclomatic • 2 scopes in 2 files\n'));
+      expect(r.out, contains('Thresholds • warn ≥ 1, fail ≥ 2\n'));
+      expect(r.out, contains('  ≥ fail     2 100.0%\n'));
+      expect(r.out, contains('    lib/a.dart:1 function f\n'));
+      expect(r.out, contains('    lib/b.dart:1 function g\n'));
+      expect(
+        run([
+          'stats',
+          'lib',
+          '--threshold',
+          'cyclomatic=warn:1,fail:2',
+          '--color',
+          'always',
+        ]).out,
+        contains('\x1B[1mcyclomatic\x1B[0m'),
+      );
+    });
+
+    test('--json writes only the stats document; parse errors exit 2', () {
+      write('lib/a.dart', fn);
+      write('lib/bad.dart', 'int g() => 0\n');
+      final r = run([
+        'stats',
+        'lib',
+        '--json',
+        '--set',
+        'closure_rollup=include_in_parent',
+      ]);
+      expect(r.code, 2);
+      expect(r.err, isEmpty);
+      final json = jsonDecode(r.out) as Map;
+      expect(json['schemaVersion'], statsSchemaVersion);
+      expect(json['status'], 'errors');
+      expect(json['summary'], {'files': 2, 'filesWithErrors': 1});
+      expect(((json['metrics'] as Map)['cyclomatic'] as Map)['scopes'], 2);
+      expect(json, isNot(contains('files')));
+    });
+
+    test('no thresholds in config: none configured', () {
+      write('lib/a.dart', fn);
+      expect(run(['stats']).out, contains('Thresholds • none configured'));
     });
   });
 
