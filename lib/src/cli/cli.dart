@@ -11,6 +11,7 @@ import '../config/loader.dart';
 import '../engine/metric.dart';
 import '../engine/result.dart';
 import '../io/analyze_paths.dart';
+import '../report/ansi.dart';
 import '../report/run_result.dart';
 import '../metrics/cyclomatic/cyclomatic.dart';
 import '../report/console_reporter.dart';
@@ -60,6 +61,14 @@ ArgParser buildAnalyzeParser() => ArgParser()
     negatable: false,
     help: 'Console output: print every scope, not only warn/fail/suppressed.',
   )
+  ..addOption(
+    'color',
+    allowed: ['auto', 'always', 'never'],
+    defaultsTo: 'auto',
+    help:
+        'Console output: auto colors when stdout is a terminal, NO_COLOR is '
+        'unset and TERM is not dumb.',
+  )
   ..addFlag('help', abbr: 'h', negatable: false, help: 'Show this help.');
 
 String usage() =>
@@ -71,13 +80,16 @@ String usage() =>
     'unreadable files, invalid config), 3 usage error.';
 
 /// Runs the CLI and returns the exit code. [runRoot] is the working
-/// directory paths are reported relative to.
+/// directory paths are reported relative to. [stdoutIsTerminal] and
+/// [environment] feed `--color auto`; the defaults never color.
 int runCli(
   List<String> args, {
   required StringSink out,
   required StringSink err,
   required String runRoot,
   List<Metric>? metrics,
+  bool stdoutIsTerminal = false,
+  Map<String, String> environment = const {},
 }) {
   if (args.isEmpty || args.first == '--help' || args.first == '-h') {
     (args.isEmpty ? err : out).writeln(usage());
@@ -140,7 +152,12 @@ int runCli(
       ),
     );
   } else {
-    out.write(renderConsole(result, all: parsed.flag('all')));
+    final palette = resolveColor(
+      ColorMode.values.byName(parsed.option('color')!),
+      stdoutIsTerminal: stdoutIsTerminal,
+      environment: environment,
+    );
+    out.write(renderConsole(result, all: parsed.flag('all'), palette: palette));
   }
   return result.exitCode;
 }

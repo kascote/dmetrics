@@ -19,6 +19,7 @@ export 'src/engine/suppress.dart';
 export 'src/io/analyze_paths.dart';
 export 'src/io/discovery.dart';
 export 'src/metrics/cyclomatic/cyclomatic.dart';
+export 'src/report/ansi.dart';
 export 'src/report/console_reporter.dart';
 export 'src/report/json_reporter.dart';
 export 'src/report/run_result.dart';

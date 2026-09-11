@@ -69,6 +69,31 @@ void main() {
       );
     });
 
+    test('--color: never by default off a tty, always forces, auto follows the tty', () {
+      write('lib/a.dart', fn);
+      const flags = [
+        'analyze',
+        'lib',
+        '--threshold',
+        'cyclomatic=warn:1,fail:2',
+      ];
+      expect(run(flags).out, isNot(contains('\x1B[')));
+      expect(
+        run([...flags, '--color', 'always']).out,
+        contains('\x1B[31mfail'),
+      );
+      final out = StringBuffer();
+      runCli(
+        [...flags, '--color', 'auto'],
+        out: out,
+        err: StringBuffer(),
+        runRoot: tmp.path,
+        stdoutIsTerminal: true,
+      );
+      expect(out.toString(), contains('\x1B[31mfail'));
+      expect(run([...flags, '--color', 'plaid']).code, exitUsage);
+    });
+
     test('--threshold and --fail-on drive exit 1', () {
       write('lib/a.dart', fn);
       expect(run(['analyze', 'lib']).code, 0);

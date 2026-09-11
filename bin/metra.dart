@@ -8,6 +8,8 @@ Future<void> main(List<String> args) async {
     out: stdout,
     err: stderr,
     runRoot: Directory.current.path,
+    stdoutIsTerminal: stdout.hasTerminal,
+    environment: Platform.environment,
   );
   await stdout.flush();
   await stderr.flush();

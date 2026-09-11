@@ -173,6 +173,7 @@ them, the same way `dart analyze` behaves.
 | `--json`                             | Write the JSON report to stdout. Nothing else goes to stdout in this mode.                                    |
 | `--json-contributors full\|summary`  | `summary` drops the per-contributor span list from the JSON report. Default `full`.                           |
 | `--all`                              | Console mode: print every scope, not only `warn`/`fail`/`suppressed`.                                         |
+| `--color auto\|always\|never`        | Console mode. `auto` colors when stdout is a terminal, `NO_COLOR` is unset and `TERM` is not `dumb`.          |
 | `--config <path>`                    | Use one `analysis_options.yaml` as the config root for every file.                                            |
 | `--fail-on warn\|fail`               | Shorthand for `--set fail_on=...`.                                                                            |
 | `--set <key>=<value>`                | Fix a run-global setting for the whole run. Repeatable. Keys: `fail_on`, `closure_rollup`, `<metric>.<knob>`. |
