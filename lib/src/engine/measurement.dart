@@ -63,7 +63,7 @@ class Measurement {
 
 /// See [Measurement.tableShape].
 class TableShape {
-  static const minShare = 0.8;
+  static const minShare = 0.7;
   static const minIncrements = 8;
 
   final String kind;

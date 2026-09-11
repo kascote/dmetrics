@@ -43,7 +43,7 @@ lib/src/config/loader.dart:372:1 • fail • function resolveRun • cyclomatic
 | `cyclomatic 22`          | Metric id and the value the verdict was computed on.                        |
 | `[warn ≥ 10, fail ≥ 20]` | The thresholds that applied. Absent when none is configured.                |
 | `loop ×8, if ×7, ...`    | Contributor summary: which constructs produced the score.                   |
-| `table-shaped: case`     | One kind supplies ≥ 80% of the score (and ≥ 8 in total): a dispatch table, a field-wise `==`, a `copyWith`. Its size is the table's, not a tangle's. |
+| `table-shaped: case`     | One kind supplies ≥ 70% of the score (and ≥ 8 in total): a dispatch table, a field-wise `==`, a `copyWith`. Its size is the table's, not a tangle's. |
 
 By default only `warn`, `fail` and `suppressed` scopes are printed, followed
 by a one-line summary. `--all` prints every scope. The summary ends with the
