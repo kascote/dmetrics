@@ -8,9 +8,7 @@ or JSON.
 
 Three metrics ship today: **cyclomatic complexity** and **cognitive
 complexity** per function-shaped scope, and **import coupling** per library.
-The engine is built so that more metrics register without touching it; the
-second one proved it, and the third added a scope kind and a detail payload
-without changing the first two.
+The engine is built so that more metrics register without touching it.
 
 ## Quick start
 
@@ -559,3 +557,7 @@ tests under `test/metrics`.
 
 The design document is `SPEC.md`. Section numbers referenced in source
 comments (§6.1, §7.2, §8) point there.
+
+## License
+
+BSD 3-Clause. See [LICENSE](LICENSE).
