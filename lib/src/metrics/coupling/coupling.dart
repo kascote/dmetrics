@@ -29,6 +29,7 @@ import '../../engine/directives.dart';
 import '../../engine/measurement.dart';
 import '../../engine/metric.dart';
 import '../../engine/result.dart';
+import '../../engine/graph.dart';
 import '../../engine/scope.dart';
 
 class CouplingMetric extends Metric {
@@ -277,16 +278,16 @@ class _Graph {
     }
   }
 
-  /// Tarjan's algorithm; a component of two or more libraries is a cycle.
+  /// A component of two or more libraries is a cycle.
   void _computeCycles() {
-    final tarjan = _Tarjan(
+    final components = stronglyConnectedComponents(
       _deps.keys,
       (name) => [
         for (final d in _deps[name]!)
           if (d.isSource && _deps.containsKey(d.ref.target)) d.ref.target,
       ],
     );
-    for (final component in tarjan.components()) {
+    for (final component in components) {
       if (component.length < 2) continue;
       final members = component..sort();
       for (final m in members) {
@@ -317,67 +318,5 @@ class _Graph {
         'cycle': ?_cycles[unit.name],
       },
     );
-  }
-}
-
-/// Strongly connected components of a directed graph, iteratively so a long
-/// import chain cannot overflow the stack.
-class _Tarjan {
-  final Iterable<String> nodes;
-  final List<String> Function(String) edges;
-  final _index = <String, int>{};
-  final _low = <String, int>{};
-  final _onStack = <String>{};
-  final _stack = <String>[];
-  final _out = <List<String>>[];
-  var _next = 0;
-
-  _Tarjan(this.nodes, this.edges);
-
-  List<List<String>> components() {
-    for (final n in nodes) {
-      if (!_index.containsKey(n)) _visit(n);
-    }
-    return _out;
-  }
-
-  void _visit(String root) {
-    final work = <(String, Iterator<String>)>[(root, _enter(root))];
-    while (work.isNotEmpty) {
-      final (node, it) = work.last;
-      if (it.moveNext()) {
-        final next = it.current;
-        if (!_index.containsKey(next)) {
-          work.add((next, _enter(next)));
-        } else if (_onStack.contains(next)) {
-          _low[node] = _low[node]!.clamp(0, _index[next]!);
-        }
-        continue;
-      }
-      work.removeLast();
-      if (work.isNotEmpty) {
-        final parent = work.last.$1;
-        _low[parent] = _low[parent]!.clamp(0, _low[node]!);
-      }
-      if (_low[node] == _index[node]) _pop(node);
-    }
-  }
-
-  Iterator<String> _enter(String node) {
-    _index[node] = _low[node] = _next++;
-    _stack.add(node);
-    _onStack.add(node);
-    return edges(node).iterator;
-  }
-
-  void _pop(String root) {
-    final component = <String>[];
-    String member;
-    do {
-      member = _stack.removeLast();
-      _onStack.remove(member);
-      component.add(member);
-    } while (member != root);
-    _out.add(component);
   }
 }

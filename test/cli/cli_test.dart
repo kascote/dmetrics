@@ -39,6 +39,10 @@ void main() {
         ['stats', '--all'],
         ['stats', '--fail-on', 'warn'],
         ['stats', '--set', 'novalue'],
+        ['deps', '--all'],
+        ['deps', '--fail-on', 'warn'],
+        ['deps', '--top', '0'],
+        ['deps', '--depth', 'two'],
       ]) {
         final r = run(args);
         expect(r.code, exitUsage, reason: '$args');
@@ -52,11 +56,13 @@ void main() {
       expect(top.code, 0);
       expect(top.out, contains('$toolName analyze'));
       expect(top.out, contains('$toolName stats'));
+      expect(top.out, contains('$toolName deps'));
       expect(
         run(['analyze', '-h']).out,
         startsWith('Usage: $toolName analyze'),
       );
       expect(run(['stats', '-h']).out, startsWith('Usage: $toolName stats'));
+      expect(run(['deps', '-h']).out, startsWith('Usage: $toolName deps'));
       expect(run(['--version']).out, '$toolName $toolVersion\n');
     });
 
@@ -268,6 +274,51 @@ void main() {
         ((configs.single['metrics'] as Map)['cyclomatic'] as Map)['thresholds'],
         isNull,
       );
+    });
+  });
+
+  group('deps', () {
+    const a = "import 'b.dart';\nint f() => 0;\n";
+    const b = "import 'a.dart';\n";
+
+    test('console output, exit 0 even with violations', () {
+      write('lib/a.dart', a);
+      write('lib/b.dart', b);
+      write('lib/src/c.dart', "import '../a.dart';\n");
+      final r = run(['deps', 'lib', '--threshold', 'coupling=warn:1,fail:1']);
+      expect(r.code, 0);
+      expect(r.err, isEmpty);
+      expect(
+        r.out,
+        startsWith(
+          'Dependencies • 3 libraries • 3 edges (3 imports, 0 exports)\n'
+          'Cycles • 1 component • largest 2 of 3 libraries (66.7%) • '
+          '1 back edge\n'
+          '  #1 • 2 libraries • 1 back edge\n'
+          '    lib/b.dart → lib/a.dart\n',
+        ),
+      );
+      expect(r.out, contains('      1     2  0.33  lib/a.dart  cycle #1\n'));
+      expect(r.out, contains('Directories • depth 1 • 1 directory • 0 edges'));
+      expect(
+        run(['deps', 'lib', '--top', '1', '--color', 'always']).out,
+        contains('\x1B[1mFan-out\x1B[0m • top 1'),
+      );
+    });
+
+    test('--json writes only the deps document; parse errors exit 2', () {
+      write('lib/a.dart', a);
+      write('lib/b.dart', b);
+      write('lib/bad.dart', 'int g() => 0\n');
+      final r = run(['deps', 'lib', '--json', '--depth', '2']);
+      expect(r.code, 2);
+      expect(r.err, isEmpty);
+      final json = jsonDecode(r.out) as Map;
+      expect(json['schemaVersion'], depsSchemaVersion);
+      expect(json['status'], 'errors');
+      expect((json['summary'] as Map)['libraries'], 3);
+      expect((json['directories'] as Map)['depth'], 2);
+      expect(json, isNot(contains('files')));
     });
   });
 

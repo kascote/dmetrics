@@ -15,6 +15,7 @@ import '../engine/report.dart';
 import '../engine/result.dart';
 import '../version.dart';
 import 'ansi.dart';
+import 'format.dart';
 import 'run_result.dart';
 
 const statsSchemaVersion = 1;
@@ -358,9 +359,9 @@ void _renderMetric(
 ) {
   final header = [
     palette.bold(m.metricId),
-    '${_n(m.scopes, 'scope')} in ${_n(stats.files, 'file')}',
+    '${plural(m.scopes, 'scope')} in ${plural(stats.files, 'file')}',
     if (stats.filesWithErrors > 0)
-      '${_n(stats.filesWithErrors, 'file')} with parse errors',
+      '${plural(stats.filesWithErrors, 'file')} with parse errors',
   ];
   out.writeln(header.join(' • '));
   if (m.scopes == 0) return;
@@ -374,7 +375,7 @@ void _renderMetric(
     '${palette.bold('Contributor mix')} • share of summed increments',
   );
   out.writeln(
-    '  ${m.contributorMix.entries.map((e) => '${e.key} ${_pct(e.value).trim()}').join(' • ')}',
+    '  ${m.contributorMix.entries.map((e) => '${e.key} ${pct(e.value).trim()}').join(' • ')}',
   );
   _renderClusters(out, m, palette);
 }
@@ -385,7 +386,7 @@ void _renderDistribution(StringBuffer out, MetricStats m, Palette palette) {
   for (final b in m.bands) {
     final bar = widest == 0 ? 0 : (b.count / widest * 20).round();
     out.writeln(
-      '  ${b.label.padRight(6)} ${_countCol(b.count)} ${_pct(b.share)}'
+      '  ${b.label.padRight(6)} ${countCol(b.count)} ${pct(b.share)}'
       '${bar > 0 ? '  ${palette.dim('█' * bar)}' : ''}',
     );
   }
@@ -421,7 +422,7 @@ void _renderClusters(StringBuffer out, MetricStats m, Palette palette) {
         .map((e) => '${e.key} ×${e.value}')
         .join(', ');
     out.writeln(
-      '  ${m.metricId} ${c.value} • $summary • ${_n(c.scopes.length, 'scope')}',
+      '  ${m.metricId} ${c.value} • $summary • ${plural(c.scopes.length, 'scope')}',
     );
     for (final s in c.scopes) {
       out.writeln('    ${s.path}:${s.line} ${s.kind} ${s.qualifiedName}');
@@ -435,16 +436,10 @@ String _shareLine(
   String Function(String) paint,
   Palette palette,
 ) {
-  final count = s.count == 0 ? _countCol(s.count) : paint(_countCol(s.count));
-  return '  ${label.padRight(6)} $count ${_pct(s.share)}'
+  final count = s.count == 0 ? countCol(s.count) : paint(countCol(s.count));
+  return '  ${label.padRight(6)} $count ${pct(s.share)}'
       '${s.tableShaped > 0 ? '  ${palette.dim('${s.tableShaped} table-shaped')}' : ''}';
 }
-
-String _countCol(int n) => '$n'.padLeft(5);
-
-String _pct(double share) => '${(share * 100).toStringAsFixed(1)}%'.padLeft(6);
-
-String _n(int count, String noun) => '$count $noun${count == 1 ? '' : 's'}';
 
 // --- JSON ------------------------------------------------------------------
 

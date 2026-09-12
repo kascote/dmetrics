@@ -182,6 +182,7 @@ roots.
 ```
 dmetrics analyze [<file>|<dir> ...] [options]
 dmetrics stats   [<file>|<dir> ...] [options]
+dmetrics deps    [<file>|<dir> ...] [options]
 ```
 
 No targets means the current directory. Files and directories mix freely.
@@ -198,6 +199,8 @@ them, the same way `dart analyze` behaves.
 | `--fail-on warn\|fail`               | `analyze` only. Shorthand for `--set fail_on=...`.                                                            |
 | `--set <key>=<value>`                | Fix a run-global setting for the whole run. Repeatable. Keys: `fail_on`, `closure_rollup`, `<metric>.<knob>`. |
 | `--threshold <metric>=warn:N,fail:M` | Force a metric's thresholds in every root, above any `overrides`. Repeatable. Order of `warn`/`fail` is free. |
+| `--top N`                            | `deps` only, console mode. Rows per hub table and back edges listed per cycle. Default 10.                     |
+| `--depth N`                          | `deps` only. Directory levels kept under `lib/src` (or `lib`) when folding the graph. Default 1.              |
 | `--help`, `-h`                       | Usage.                                                                                                        |
 | `--version`                          | Tool name and version.                                                                                        |
 
@@ -266,6 +269,57 @@ codes are 0 or 2 (analysis incomplete); violations never make `stats` exit 1.
 `summary`, `diagnostics`, `metrics.<id>` with `bands`, `percentiles`,
 `thresholds`, `sweep`, `contributorMix`, `siblingClusters`; shares are
 fractions in `[0, 1]`), not the `analyze` report.
+
+### Seeing the graph: `dmetrics deps`
+
+`analyze` says "coupling 13" on a library's line and lists its dependencies
+in the JSON detail; that resolves nothing on its own. `dmetrics deps` reads
+the same data for the whole run and prints the structure:
+
+```
+Dependencies • 33 libraries • 145 edges (121 imports, 24 exports)
+Cycles • none
+Fan-out • top 10 • I = instability, out / (in + out)
+    out    in     I  library
+     14     1  0.93  lib/src/cli/cli.dart
+     10     2  0.83  lib/src/engine/engine.dart
+     ...
+Fan-in • top 10
+    out    in     I  library
+      2    16  0.11  lib/src/engine/result.dart
+      5    14  0.26  lib/src/engine/metric.dart
+     ...
+Directories • depth 1 • 8 directories • 16 edges • 1 back edge
+  layering bin › cli › io › metrics › report › engine › config › lib
+     16  report  → engine
+     14  metrics → engine
+      6  cli     → report
+      5  engine  → config
+      3  config  → engine   back
+     ...
+```
+
+- **Cycles**: every strongly connected component of two or more libraries,
+  largest first, each with its **back edges**: the imports a greedy
+  feedback-arc-set order points against. Remove them and the component is
+  acyclic. A 114-library component (pub) is described by its ~100 back
+  edges rather than by a member list. Membership is not judged.
+- **Fan-out / Fan-in**: the hub libraries, with Martin's instability
+  `I = out / (in + out)` (0: depended upon, depends on nothing; 1: the
+  reverse). Fan-out is colored by the coupling verdict; `cycle #n` points
+  at the component above.
+- **Directories**: the graph folded onto the first `--depth` levels under
+  `lib/src` (or `lib`; `bin`, `test` and a monorepo's `packages/foo` stay
+  apart), as a layering with per-edge library counts. Edges against the
+  layering are marked `back`: the minority direction between directories
+  that depend on each other. Import edges only; a barrel's re-exports are
+  not what its directory needs.
+
+The picture is complete only when the whole package is in the run. Exit
+codes and `--json` behave as for `stats`: the document has `summary`,
+`libraries[]` (`fanOut`, `fanIn`, `exports`, `instability`, `cycle`,
+`verdict`), `cycles[]` (`members`, `backEdges`) and `directories` (`order`,
+`edges` with `back`).
 
 ## Suppressions
 
@@ -437,7 +491,8 @@ The JSON `detail` of a library result is the graph: `dependencies` (counted),
 this one), and `cycle` when the library is in an import cycle (the members,
 itself included). Cycles are reported, not judged: most of every mature
 package sits in one, so a verdict on membership would flag everything. The
-console prints `cycle of N` on the library's line.
+console prints `cycle of N` on the library's line; `dmetrics deps` shows the
+run-level picture (see [above](#seeing-the-graph-dmetrics-deps)).
 
 No knobs. The table-shaped marker never fires for this metric: an import
 list is what it counts.

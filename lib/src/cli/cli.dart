@@ -1,10 +1,11 @@
 /// `dmetrics analyze [<file>|<dir> ...] [--json] [--config <path>]
 /// [--fail-on warn|fail] [--set <key>=<value>] [--threshold <spec>]` (§7.1),
-/// and `dmetrics stats` with the same targets and config handling.
+/// and `dmetrics stats` / `dmetrics deps` with the same targets and config
+/// handling.
 ///
 /// Exit codes (§7.2): 0 clean, 1 violations, 2 analysis incomplete, 3 usage.
-/// `stats` never exits 1: violations are its subject, not its outcome. In
-/// `--json` mode nothing but the document goes to stdout.
+/// `stats` and `deps` never exit 1: violations are their subject, not their
+/// outcome. In `--json` mode nothing but the document goes to stdout.
 library;
 
 import 'package:args/args.dart';
@@ -19,6 +20,7 @@ import '../metrics/cognitive/cognitive.dart';
 import '../metrics/coupling/coupling.dart';
 import '../metrics/cyclomatic/cyclomatic.dart';
 import '../report/console_reporter.dart';
+import '../report/deps.dart';
 import '../report/json_reporter.dart';
 import '../report/stats.dart';
 import '../version.dart';
@@ -32,7 +34,7 @@ List<Metric> defaultMetrics() => [
   CouplingMetric(),
 ];
 
-/// Options both commands take: targets and config handling, output mode.
+/// Options every command takes: targets and config handling, output mode.
 ArgParser _commonParser(String jsonHelp) => ArgParser()
   ..addFlag('json', negatable: false, help: jsonHelp)
   ..addOption(
@@ -88,6 +90,24 @@ ArgParser buildAnalyzeParser() =>
 ArgParser buildStatsParser() =>
     _commonParser('Write the stats document to stdout.');
 
+ArgParser buildDepsParser() =>
+    _commonParser('Write the dependency graph document to stdout.')
+      ..addOption(
+        'top',
+        defaultsTo: '10',
+        valueHelp: 'N',
+        help:
+            'Console output: rows per hub table and members listed per cycle.',
+      )
+      ..addOption(
+        'depth',
+        defaultsTo: '1',
+        valueHelp: 'N',
+        help:
+            'Directory graph: levels kept under lib/src (or lib), so 1 folds '
+            'lib/src/a/b/x.dart into `a` and 2 into `a/b`.',
+      );
+
 const _exitCodes =
     'Exit codes: 0 clean, 1 violations (analyze only), 2 analysis incomplete\n'
     '(parse errors, unreadable files, invalid config), 3 usage error.';
@@ -106,12 +126,23 @@ String usage([String? command]) => switch (command) {
         'over candidate thresholds, the contributor mix and sibling clusters\n'
         '(same value and contributor mix). For calibrating thresholds.\n\n'
         '${buildStatsParser().usage}\n\n$_exitCodes',
+  'deps' =>
+    'Usage: $toolName deps [<file>|<dir> ...] [options]\n\n'
+        'Measures the same way analyze does, then prints the dependency graph\n'
+        'of the run as a whole: edge counts, the largest cycles, the libraries\n'
+        'with the highest fan-out and fan-in with their instability, and the\n'
+        'graph folded onto directories with the edges that close a directory\n'
+        'cycle marked. Complete only when the whole package is in the run.\n\n'
+        '${buildDepsParser().usage}\n\n$_exitCodes',
   _ =>
     'Usage: $toolName analyze [<file>|<dir> ...] [options]\n'
-        '       $toolName stats   [<file>|<dir> ...] [options]\n\n'
+        '       $toolName stats   [<file>|<dir> ...] [options]\n'
+        '       $toolName deps    [<file>|<dir> ...] [options]\n\n'
         'analyze  Measure code metrics and print one consolidated report.\n'
         'stats    Distribution, threshold shares, sweep, contributor mix and\n'
-        '         sibling clusters per metric, for calibrating thresholds.\n\n'
+        '         sibling clusters per metric, for calibrating thresholds.\n'
+        'deps     The dependency graph of the run: cycles, hubs by fan-out\n'
+        '         and fan-in, and the graph folded onto directories.\n\n'
         'Run `$toolName <command> --help` for the command\'s options.\n\n'
         '$_exitCodes',
 };
@@ -137,7 +168,7 @@ int runCli(
     return 0;
   }
   final command = args.first;
-  if (command != 'analyze' && command != 'stats') {
+  if (!const {'analyze', 'stats', 'deps'}.contains(command)) {
     err.writeln('Unknown command `$command`.\n\n${usage()}');
     return exitUsage;
   }
@@ -145,17 +176,12 @@ int runCli(
   final ArgResults parsed;
   final CliOverrides cli;
   try {
-    parsed = (command == 'stats' ? buildStatsParser() : buildAnalyzeParser())
-        .parse(args.sublist(1));
+    parsed = _parserFor(command).parse(args.sublist(1));
     if (parsed.flag('help')) {
       out.writeln(usage(command));
       return 0;
     }
-    cli = parseCliOverrides(
-      set: parsed.multiOption('set'),
-      thresholds: parsed.multiOption('threshold'),
-      failOn: command == 'stats' ? null : parsed.option('fail-on'),
-    );
+    cli = _overridesFor(command, parsed);
   } on FormatException catch (e) {
     err.writeln('${e.message}\n\n${usage(command)}');
     return exitUsage;
@@ -185,9 +211,59 @@ int runCli(
           stdoutIsTerminal: stdoutIsTerminal,
           environment: environment,
         );
-  return command == 'stats'
-      ? _emitStats(parsed, result, out, palette)
-      : _emitReport(parsed, result, out, palette);
+  return switch (command) {
+    'stats' => _emitStats(parsed, result, out, palette),
+    'deps' => _emitDeps(parsed, result, out, palette),
+    _ => _emitReport(parsed, result, out, palette),
+  };
+}
+
+ArgParser _parserFor(String command) => switch (command) {
+  'stats' => buildStatsParser(),
+  'deps' => buildDepsParser(),
+  _ => buildAnalyzeParser(),
+};
+
+/// The CLI layer of the config, after the command's own options are checked
+/// (`deps` validates its integers here so a bad one is a usage error before
+/// any analysis runs).
+CliOverrides _overridesFor(String command, ArgResults parsed) {
+  if (command == 'deps') {
+    _positive(parsed, 'top');
+    _positive(parsed, 'depth');
+  }
+  return parseCliOverrides(
+    set: parsed.multiOption('set'),
+    thresholds: parsed.multiOption('threshold'),
+    failOn: command == 'analyze' ? parsed.option('fail-on') : null,
+  );
+}
+
+/// Exit 0 or 2, like stats: the graph is the subject, not a verdict.
+int _emitDeps(
+  ArgResults parsed,
+  RunResult result,
+  StringSink out,
+  Palette palette,
+) {
+  final deps = computeDeps(result, depth: _positive(parsed, 'depth'));
+  if (parsed.flag('json')) {
+    out.writeln(renderDepsJson(deps, status: result.status));
+  } else {
+    out.write(
+      renderDepsConsole(deps, top: _positive(parsed, 'top'), palette: palette),
+    );
+  }
+  return result.status == RunStatus.errors ? RunStatus.errors.exitCode : 0;
+}
+
+int _positive(ArgResults parsed, String option) {
+  final raw = parsed.option(option)!;
+  final n = int.tryParse(raw);
+  if (n == null || n < 1) {
+    throw UsageError('--$option expects a positive integer, got `$raw`');
+  }
+  return n;
 }
 
 /// Exit 0 or 2: violations are the subject of stats, not its outcome.
