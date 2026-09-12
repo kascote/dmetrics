@@ -6,8 +6,9 @@ constructors, local functions, closures), compares each value against
 thresholds you configure, and prints one consolidated report as console text
 or JSON.
 
-The one metric shipped today is **cyclomatic complexity**. The engine is
-built so that more metrics register without touching it.
+Two metrics ship today: **cyclomatic complexity** and **cognitive
+complexity**. The engine is built so that more metrics register without
+touching it; the second one proved it.
 
 ## Quick start
 
@@ -43,7 +44,7 @@ lib/src/config/loader.dart:372:1 • fail • function resolveRun • cyclomatic
 | `cyclomatic 22`          | Metric id and the value the verdict was computed on.                        |
 | `[warn ≥ 10, fail ≥ 20]` | The thresholds that applied. Absent when none is configured.                |
 | `loop ×8, if ×7, ...`    | Contributor summary: which constructs produced the score.                   |
-| `table-shaped: case`     | One kind supplies ≥ 70% of the score (and ≥ 8 in total): a dispatch table, a field-wise `==`, a `copyWith`. Its size is the table's, not a tangle's. `case` pools `pattern-or` and `when`: a guarded arm is still one arm. |
+| `table-shaped: case`     | One kind supplies ≥ 70% of the score (and ≥ 8 in total): a dispatch table, a field-wise `==`, a `copyWith`. Its size is the table's, not a tangle's. `case` pools `pattern-or` and `when`: a guarded arm is still one arm. For cognitive the family is a kind at a nesting level: `table-shaped: if@1` means the score is mostly `if`s one level down (a `switch` whose arms each hold a run of `if`s), `if` alone means `if`s at the top of the body. See below. |
 
 By default only `warn`, `fail` and `suppressed` scopes are printed, followed
 by a one-line summary. `--all` prints every scope. The summary ends with the
@@ -82,6 +83,8 @@ dmetrics:
       thresholds: { warn: 10, fail: 20 } # the built-in default; `none` turns them off
       count_case_arms: true # run-global knob
       count_null_coalescing: true # run-global knob
+    cognitive:
+      thresholds: { warn: 15, fail: 25 } # the built-in default
   overrides: # thresholds and enablement only; last match wins
     - paths: ["test/**"]
       metrics:
@@ -117,9 +120,11 @@ Under `metrics.<id>:`:
 
 Cyclomatic ships with `warn: 10, fail: 20` built in, chosen from a field
 trial over eleven codebases where 10 sat near the 90th–95th percentile of
-scope scores and 20 flagged only real tangles. `thresholds: none` turns
-thresholds off for a metric in that root; `dmetrics stats` shows where your own
-codebase sits before you tune them.
+scope scores and 20 flagged only real tangles. Cognitive ships with
+`warn: 15, fail: 25`, calibrated over the same corpus to the same prevalence
+(SonarSource's own default is 15). `thresholds: none` turns thresholds off
+for a metric in that root; `dmetrics stats` shows where your own codebase sits
+before you tune them.
 
 ### Cyclomatic knobs
 
@@ -278,7 +283,8 @@ void alsoFine() { // ignore: dmetrics_cyclomatic
 - `// ignore_for_file: dmetrics_<metric>` or `// ignore_for_file: dmetrics`
   anywhere in the file suppresses the whole file.
 - Other names in the same comment (`// ignore: unused_element, dmetrics_cyclomatic`)
-  are ignored, as the analyzer does.
+  are ignored, as the analyzer does. Metric names are the ids: `dmetrics_cyclomatic`,
+  `dmetrics_cognitive`.
 - A line ignore applies only to the **outermost** scopes starting on that
   line. Suppressing a method does not suppress its closures. To suppress a
   closure, put the ignore on the closure's own line.
@@ -337,6 +343,63 @@ from static types.
 Not measured: abstract, external and redirecting-factory declarations (no
 body, no scope). Branch constructs directly inside field or top-level
 variable initializers, outside any closure, are ignored in v1.
+
+## Cognitive complexity rules
+
+Base score 0 per scope. After SonarSource's cognitive complexity: every break
+in the linear flow counts, nesting makes it cost more, and shorthand is free.
+A structure counts 1 plus the number of nesting bodies it sits in (branches,
+loop and `catch` bodies, `switch` arms); a link in a chain and a labeled jump
+count 1 flat; a run of the same boolean operator counts 1.
+
+| Construct                                                                    | Δ            | Kind                |
+| ---------------------------------------------------------------------------- | ------------ | ------------------- |
+| `if`, `if-case`, collection `if` element                                     | +1 + nesting | `if`                |
+| `else if`                                                                    | +1           | `else-if`           |
+| `else`                                                                       | +1           | `else`              |
+| `for`, `for-in`, `await for`, `while`, `do-while`, collection `for` element  | +1 + nesting | `loop`              |
+| `switch` statement or expression                                             | +1 + nesting | `switch`            |
+| `case` arms, `default`, patterns, `when` guards, `\|\|` and `&&` patterns    | 0            | —                   |
+| `catch`, `on T catch`, `on T`                                                | +1 + nesting | `catch`             |
+| `c ? a : b`                                                                  | +1 + nesting | `ternary`           |
+| Run of `&&`, run of `\|\|` (operator change starts a new run)               | +1 per run   | `&&`, `\|\|`        |
+| Labeled `break`, labeled `continue`                                          | +1           | `break`, `continue` |
+| `??`, `??=`, `?.`, `?..`, `?[]`, `!`, `?x`, `...`, `...?`                    | 0            | —                   |
+| `assert`, `return`, `throw`, `yield`, `await`, unlabeled jumps, cascades     | 0            | —                   |
+| Recursion                                                                    | 0            | —                   |
+| Closure / local function                                                     | own scope    | —                   |
+
+A condition is read at its statement's level; the branch is one deeper. An
+`if / else if / else` chain reads flat: the links cost 1 each and every
+branch is one level deeper than the chain. A `switch` costs 1 however many
+arms it has, `&&`/`||` runs and null-aware shorthand cost nothing extra, so
+the case tables, `==` and `copyWith` methods that cyclomatic flags score
+near 0 here, and a ladder of nested `if`s scores 1 + 2 + 3.
+
+A closure or local function is its own scope whose body starts one level
+deeper than the point where it is written, so its own score says how hard
+it is to read where it sits. Under `include_in_parent` the parent's value
+is `measured + Σ child.value`, which is the number SonarSource reports for
+the whole method. A closure in a field or top-level initializer starts at
+level 0, like a function. Same scopes as cyclomatic; no knobs.
+
+**Reading `table-shaped: if@1`.** The marker names the contributor family
+that supplies at least 70% of the score. For cognitive, a family is a kind
+at a nesting level: `if` is `if`s at the top of the body, `if@1` is `if`s
+one level down, `if@2` two levels down. `else if` and `else` count toward
+the `if` family of their chain; `&&`, `||`, `break` and `continue` never
+nest and keep their plain kind. So:
+
+- `table-shaped: if` — a flat run of top-level `if`s, e.g. a `toString`
+  that appends one line per non-null field, or a validator of early returns.
+- `table-shaped: if@1` — a flat run of `if`s all one level in: a `switch`
+  whose arms each check a few conditions, or a widget's `children: [if (a)
+  X, if (b) Y, …]` inside a `builder:` closure. Still a table, just indented.
+- No marker on a scope full of `if`s — the `if`s sit at different levels,
+  which is a ladder. A ladder of `1 + 2 + 3 + 4` is the tangle this metric
+  exists to find, and pooling by kind alone would have called it a table.
+
+The score is unchanged either way; the marker is a reading hint.
 
 ## JSON report
 

@@ -73,9 +73,11 @@ void main() {
       final r = run(['analyze']);
       expect(r.code, 0);
       expect(r.err, isEmpty);
+      // One `ok` per metric result: every registered metric measures the scope.
       expect(
         r.out,
-        '1 scope in 1 file • 0 fail, 0 warn, 1 ok, 0 suppressed • status: ok\n',
+        '1 scope in 1 file • 0 fail, 0 warn, ${defaultMetrics().length} ok, '
+        '0 suppressed • status: ok\n',
       );
     });
 
@@ -211,7 +213,7 @@ void main() {
       ]);
       expect(r.code, 0);
       expect(r.err, isEmpty);
-      expect(r.out, startsWith('cyclomatic • 2 scopes in 2 files\n'));
+      expect(r.out, contains('cyclomatic • 2 scopes in 2 files\n'));
       expect(r.out, contains('Thresholds • warn ≥ 1, fail ≥ 2\n'));
       expect(r.out, contains('  ≥ fail     2 100.0%\n'));
       expect(r.out, contains('    lib/a.dart:1 function f\n'));

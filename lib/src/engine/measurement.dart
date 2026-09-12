@@ -93,7 +93,8 @@ class Contributor {
   /// The group [tableShape] pools this kind with. Defaults to [kind]; a
   /// metric names a family when several of its kinds are one construct
   /// written in pieces, so that a scope built from all of them is still
-  /// read as a table.
+  /// read as a table, or when one kind is several things (`if`s at
+  /// different nesting levels), so that a ladder of them is not.
   final String family;
   final num increment;
   final FileSpan span;

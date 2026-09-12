@@ -125,44 +125,14 @@ class _Parser {
 
   LoadedConfig parse(YamlNode section) {
     var root = RootConfig(source: source);
-    if (section is YamlScalar && section.value == null) {
-      // `dmetrics:` with nothing under it: a root with defaults.
-    } else if (section is! YamlMap) {
-      problem('`$configKey` must be a map', section);
-    } else {
+    if (section is YamlMap) {
       for (final entry in section.nodes.entries) {
-        final key = '${(entry.key as YamlNode).value}';
-        final node = entry.value;
-        switch (key) {
-          case RunConfig.keyFailOn:
-            final v = _enumValue(node, key, FailOn.values.map((f) => f.name));
-            if (v != null) runValues[key] = FailOn.fromLabel(v);
-          case RunConfig.keyClosureRollup:
-            final v = _enumValue(
-              node,
-              key,
-              ClosureRollup.values.map((c) => c.label),
-            );
-            if (v != null) runValues[key] = ClosureRollup.fromLabel(v);
-          case 'include':
-            final globs = _stringList(node, key);
-            if (globs != null) root = root.copyWith(include: globs);
-          case 'exclude':
-            final globs = _stringList(node, key);
-            if (globs != null) root = root.copyWith(exclude: globs);
-          case 'metrics':
-            root = root.copyWith(
-              metrics: _metricsMap(node, allowRunGlobal: true),
-            );
-          case 'overrides':
-            root = root.copyWith(overrides: _overrides(node));
-          default:
-            problem(
-              'unknown key `$key` under `$configKey`',
-              entry.key as YamlNode,
-            );
-        }
+        root = _topLevelEntry(root, entry.key as YamlNode, entry.value);
       }
+    } else if (section is! YamlScalar || section.value != null) {
+      // `dmetrics:` with nothing under it is a root with defaults; anything
+      // else that is not a map is a mistake.
+      problem('`$configKey` must be a map', section);
     }
     return LoadedConfig(
       source: source,
@@ -170,6 +140,37 @@ class _Parser {
       runValues: runValues,
       problems: problems,
     );
+  }
+
+  /// One `key: value` under `dmetrics:`. Run-global keys land in
+  /// [runValues]; per-root keys return an updated [root].
+  RootConfig _topLevelEntry(RootConfig root, YamlNode keyNode, YamlNode node) {
+    final key = '${keyNode.value}';
+    switch (key) {
+      case RunConfig.keyFailOn:
+        final v = _enumValue(node, key, FailOn.values.map((f) => f.name));
+        if (v != null) runValues[key] = FailOn.fromLabel(v);
+      case RunConfig.keyClosureRollup:
+        final v = _enumValue(
+          node,
+          key,
+          ClosureRollup.values.map((c) => c.label),
+        );
+        if (v != null) runValues[key] = ClosureRollup.fromLabel(v);
+      case 'include':
+        final globs = _stringList(node, key);
+        if (globs != null) return root.copyWith(include: globs);
+      case 'exclude':
+        final globs = _stringList(node, key);
+        if (globs != null) return root.copyWith(exclude: globs);
+      case 'metrics':
+        return root.copyWith(metrics: _metricsMap(node, allowRunGlobal: true));
+      case 'overrides':
+        return root.copyWith(overrides: _overrides(node));
+      default:
+        problem('unknown key `$key` under `$configKey`', keyNode);
+    }
+    return root;
   }
 
   String? _enumValue(YamlNode node, String key, Iterable<String> allowed) {

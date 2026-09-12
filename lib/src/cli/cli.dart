@@ -15,6 +15,7 @@ import '../engine/result.dart';
 import '../io/analyze_paths.dart';
 import '../report/ansi.dart';
 import '../report/run_result.dart';
+import '../metrics/cognitive/cognitive.dart';
 import '../metrics/cyclomatic/cyclomatic.dart';
 import '../report/console_reporter.dart';
 import '../report/json_reporter.dart';
@@ -24,7 +25,7 @@ import '../version.dart';
 const exitUsage = 3;
 
 /// The compiled-in metric set (N3).
-List<Metric> defaultMetrics() => [CyclomaticMetric()];
+List<Metric> defaultMetrics() => [CyclomaticMetric(), CognitiveMetric()];
 
 /// Options both commands take: targets and config handling, output mode.
 ArgParser _commonParser(String jsonHelp) => ArgParser()
