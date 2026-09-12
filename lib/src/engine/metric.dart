@@ -1,18 +1,39 @@
 import 'package:analyzer/dart/ast/ast.dart';
 
 import '../config/config.dart';
+import 'directives.dart';
 import 'measurement.dart';
 import 'result.dart';
 import 'scope.dart';
 
-enum MetricRequirements { syntactic, resolved }
+/// What a metric needs from the engine, cheapest first. A run has exactly
+/// one pipeline: the most demanding level any of its metrics asks for. Every
+/// metric then consumes that pipeline's ASTs, so a syntactic metric must
+/// produce the same numbers whatever level the run ended up at.
+enum MetricRequirements {
+  /// Parsed ASTs.
+  syntactic,
 
-/// Run-level context handed to [Metric.finish]. Gains a resolved-context
-/// accessor when the resolved pipeline lands.
+  /// Parsed ASTs plus a [LibraryIndex] over the run's sources, so directive
+  /// URIs resolve to libraries. Costs a map over the source list, nothing
+  /// more; enough for import graphs.
+  directive,
+
+  /// Resolved ASTs and the element model. Not implemented: the engine
+  /// refuses a run that asks for it.
+  resolved,
+}
+
+/// Run-level context handed to [Metric.onStartRun] and [Metric.finish].
 class RunContext {
   final AnalysisConfig config;
 
-  const RunContext(this.config);
+  /// Directive resolution over the run's sources. Non-null only when the
+  /// run's pipeline is at least [MetricRequirements.directive]; a syntactic
+  /// run never builds it, so it never pays for it.
+  final LibraryIndex? libraries;
+
+  const RunContext(this.config, {this.libraries});
 }
 
 /// A passive consumer of the engine's single traversal.
@@ -64,5 +85,13 @@ abstract class Metric {
 
   /// Run-level finalization after every file has been traversed. Syntactic
   /// metrics return nothing.
+  ///
+  /// A measurement whose scope is one this metric measured during traversal
+  /// replaces what [onExitScope] returned for it, so a graph metric can
+  /// return a provisional value per library and finalize it once the whole
+  /// graph is known; the replacement then flows through aggregation,
+  /// suppression and thresholds like any other. A measurement for a scope
+  /// the run did not traverse is reported at run level. Every measurement
+  /// must carry this metric's [id].
   Iterable<Measurement> finish(RunContext ctx) => const [];
 }

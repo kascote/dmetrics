@@ -48,8 +48,8 @@ class Discovery {
 
   final _dirRoots = <String, _Root>{};
   final _parsedFiles = <String, LoadedConfig?>{};
-  final _dirVersions = <String, LanguageVersion?>{};
-  final _pubspecVersions = <String, LanguageVersion?>{};
+  final _dirPackages = <String, _Package?>{};
+  final _pubspecs = <String, _Package>{};
 
   Discovery({required String runRoot, required this.metrics, this.configPath})
     : runRoot = p.normalize(p.absolute(runRoot));
@@ -97,12 +97,14 @@ class Discovery {
         if (!config.selects(pathRelativeToRoot(rel, rootRel))) continue;
       }
       try {
+        final package = _packageFor(p.dirname(abs));
         sources.add(
           SourceFile(
             path: rel,
             content: File(abs).readAsStringSync(),
             configRoot: rootRel,
-            languageVersion: _languageVersionFor(p.dirname(abs)),
+            languageVersion: package?.languageVersion,
+            packageUri: package?.uriOf(abs),
           ),
         );
       } on FileSystemException catch (e) {
@@ -174,52 +176,30 @@ class Discovery {
     return root;
   }
 
-  /// The language version of the package containing [dir]: the `sdk` lower
-  /// bound of the nearest `pubspec.yaml` up the tree, independent of the
-  /// config root (a `dmetrics:` section may sit above or below the package).
-  /// Null outside any package or when the pubspec has no usable constraint.
-  LanguageVersion? _languageVersionFor(String dir) {
-    if (_dirVersions.containsKey(dir)) return _dirVersions[dir];
+  /// The package containing [dir]: the nearest `pubspec.yaml` up the tree,
+  /// independent of the config root (a `dmetrics:` section may sit above or
+  /// below the package). Null outside any package.
+  _Package? _packageFor(String dir) {
+    if (_dirPackages.containsKey(dir)) return _dirPackages[dir];
     final chain = <String>[];
-    LanguageVersion? version;
+    _Package? package;
     for (var d = dir; ; d = p.dirname(d)) {
-      if (_dirVersions.containsKey(d)) {
-        version = _dirVersions[d];
+      if (_dirPackages.containsKey(d)) {
+        package = _dirPackages[d];
         break;
       }
       chain.add(d);
       final pubspec = p.join(d, 'pubspec.yaml');
       if (File(pubspec).existsSync()) {
-        version = _pubspecVersions.putIfAbsent(
-          pubspec,
-          () => _sdkLowerBound(pubspec),
-        );
+        package = _pubspecs.putIfAbsent(pubspec, () => _Package.read(d));
         break;
       }
       if (p.dirname(d) == d) break;
     }
     for (final d in chain) {
-      _dirVersions[d] = version;
+      _dirPackages[d] = package;
     }
-    return version;
-  }
-
-  /// Reads `environment: sdk:` from a pubspec. Anything unreadable or
-  /// malformed yields null: a broken pubspec is `dart pub`'s problem to
-  /// report, and parsing at the latest version is still a useful answer.
-  static LanguageVersion? _sdkLowerBound(String pubspec) {
-    try {
-      final doc = loadYaml(File(pubspec).readAsStringSync());
-      if (doc is! YamlMap) return null;
-      final env = doc['environment'];
-      if (env is! YamlMap) return null;
-      final sdk = env['sdk'];
-      return sdk is String ? LanguageVersion.fromSdkConstraint(sdk) : null;
-    } on FileSystemException {
-      return null;
-    } on YamlException {
-      return null;
-    }
+    return package;
   }
 
   LoadedConfig? _parseFile(String abs) => _parsedFiles.putIfAbsent(
@@ -246,4 +226,53 @@ class _Root {
   final LoadedConfig? config;
 
   const _Root(this.dir, this.config);
+}
+
+/// What a pubspec tells the engine about the files under it.
+class _Package {
+  final String dir;
+
+  /// Null when the pubspec has no usable `name`; files then get no
+  /// `package:` URI and are reachable only by relative import.
+  final String? name;
+
+  /// The `sdk` lower bound, or null when there is no usable constraint.
+  final LanguageVersion? languageVersion;
+
+  const _Package(this.dir, this.name, this.languageVersion);
+
+  /// Reads `name` and `environment: sdk:` from `<dir>/pubspec.yaml`.
+  /// Anything unreadable or malformed yields nulls: a broken pubspec is
+  /// `dart pub`'s problem to report, and parsing at the latest version with
+  /// no package identity is still a useful answer.
+  factory _Package.read(String dir) {
+    try {
+      final doc = loadYaml(
+        File(p.join(dir, 'pubspec.yaml')).readAsStringSync(),
+      );
+      if (doc is! YamlMap) return _Package(dir, null, null);
+      final name = doc['name'];
+      final env = doc['environment'];
+      final sdk = env is YamlMap ? env['sdk'] : null;
+      return _Package(
+        dir,
+        name is String && name.isNotEmpty ? name : null,
+        sdk is String ? LanguageVersion.fromSdkConstraint(sdk) : null,
+      );
+    } on FileSystemException {
+      return _Package(dir, null, null);
+    } on YamlException {
+      return _Package(dir, null, null);
+    }
+  }
+
+  /// `package:<name>/<path under lib>` for a file under this package's
+  /// `lib/`; null for anything else (`bin/`, `test/`, a nameless package).
+  Uri? uriOf(String abs) {
+    final lib = p.join(dir, 'lib');
+    if (name == null || !p.isWithin(lib, abs)) return null;
+    return Uri.parse(
+      'package:$name/${p.split(p.relative(abs, from: lib)).join('/')}',
+    );
+  }
 }

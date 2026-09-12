@@ -13,22 +13,30 @@ class RecordingMetric extends Metric {
   int startRuns = 0;
   int finishes = 0;
 
+  /// The context handed to [onStartRun], for pipeline-selection assertions.
+  RunContext? runContext;
+
+  @override
+  final String id;
+
+  @override
+  final MetricRequirements requirements;
+
   RecordingMetric({
     Set<ScopeKind> measures = ScopeKind.measuredInV1,
     this.nodeTypes = const {},
+    this.id = 'recording',
+    this.requirements = MetricRequirements.syntactic,
   }) : _measures = measures; // ignore: prefer_initializing_formals
-
-  @override
-  String get id => 'recording';
-
-  @override
-  MetricRequirements get requirements => MetricRequirements.syntactic;
 
   @override
   Set<ScopeKind> get measures => _measures;
 
   @override
-  void onStartRun(RunContext ctx) => startRuns++;
+  void onStartRun(RunContext ctx) {
+    startRuns++;
+    runContext = ctx;
+  }
 
   @override
   void onEnterScope(ScopeContext ctx) {

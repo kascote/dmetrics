@@ -1,7 +1,9 @@
 # Dart Code Metrics Engine — High-Level Spec
 
-**Status:** Draft 0.8 · **Owner:** Nelson · **Date:** 2026-09-11
+**Status:** Draft 0.9 · **Owner:** Nelson · **Date:** 2026-09-12
 **Name:** `dmetrics`
+
+**Changes in 0.9 (resolved-pipeline spike: cost probe and engine seam):** the cost probe (`tool/resolve_probe.dart`, 13 packages) closed two open questions in §9: a directive-level import graph costs the same as parsing and matches the analyzer's element model edge for edge, while cold resolution is a fixed cost of the dependency closure (0.2–2 s, 115–815 MB), seconds not minutes. So `MetricRequirements` gains a middle level, `directive`, and the engine now selects the pipeline: the most demanding level any metric in the run asks for, `resolved` refused until it exists (§5.0, §5.1). A directive run hands metrics a `LibraryIndex` on `RunContext` that resolves `import`/`export`/`part` URIs to the run's sources; `SourceFile` gains `packageUri`, derived by the I/O layer from the nearest pubspec's `name`, so `package:` URIs resolve without a package config. The `library` scope exists: the whole compilation unit of a non-part file, opened only when a metric lists it in `measures`, named by the file's `package:` URI or path, parent of the file's top-level declarations for event and reporting purposes while ids stay allocated under the file so a top-level closure's id does not depend on the metric set. `finish` can address scopes: a measurement whose scope was traversed replaces that scope's measurement for the metric and flows through aggregation, suppression and thresholds; only measurements for untraversed scopes stay run-level. Proven with a throwaway import-count metric in the tests (not shipped): the shipped metrics produce identical ids, names, fingerprints, values and verdicts over every fixture with it registered, and both reporters render library results with no changes.
 
 **Changes in 0.8 (M5 cognitive complexity):** metric #2, `cognitive`, after SonarSource's definition adapted to Dart, with its own counting table (§6.4): base 0, every break in linear flow +1 plus one per enclosing nesting level, `else if`/`else` and labeled jumps +1 flat, one `switch` increment however many arms, one per run of the same boolean operator, null-aware shorthand 0, no knobs. Closures and local functions stay their own scopes; a closure's body starts one level deeper than where it is written, so `include_in_parent` (`value = measured + Σ child.value`) reproduces the whole-method number. Built-in thresholds `warn: 15, fail: 25`, calibrated over the M4 corpus: 15 has the prevalence cyclomatic 10 had and 25 that of cyclomatic 20, and on the M4-labeled scopes every table and boilerplate false positive scores ≤ 13 while every real tangle scores ≥ 18. The architecture proof held: zero engine changes beyond registration and an export; reporters, config, suppressions, `stats` and the JSON schema rendered the new metric unmodified. One seam finding: the table-shaped marker pools contributor families, and for a nesting-weighted metric a kind alone is the wrong family (dart_style's deepest `if` ladders were marked tables); cognitive names its families per kind and nesting level (`if`, `if@1`, `if@2`, §6.4), inside the metric. Two CLI tests that assumed a single registered metric were loosened. dmetrics' own config parser scored 25 and was split (`_Parser.parse` → `_topLevelEntry`), the same shape as M4's `resolveRun`.
 
@@ -38,7 +40,7 @@ Two framing decisions shape the roadmap:
 - **G6 — Executable spec via annotated fixtures.** Every row of the counting tables in §6.1 and §6.4 has at least one annotated Dart fixture (`// expect: cyclomatic=4`, `// expect: cognitive=3`), doubling as regression test and documentation.
 - **G7 — Fast on syntactic metrics.** Use `parseFile()`-level parsing (no resolution) whenever the requested metric set allows it. Benchmark hypothesis was a single 2k-LOC file in well under one second and a ~50k-LOC package in low single-digit seconds. Measured at M4 (2026-09-11, `dart compile exe` binary, Apple M4 Pro, warm file cache, median of three; each run is a cold process and includes config discovery, parsing, analysis and JSON serialization to stdout): a 2.3k-LOC file in 0.01 s, a 5k-LOC file in 0.02 s, pub's `lib` (36k LOC) in 0.08 s, dart-sass's `lib` (63k LOC, 4.2k scopes) in 0.16 s, and Flutter's `packages/flutter/lib` (570k LOC, 25k scopes, 44 MB of JSON) in 0.95 s. Process start dominates below ~5k LOC; above that the cost is linear at roughly 600k LOC/s on one core. The hypothesis holds with a margin of about 20×, so parallelism across isolates stays unneeded for syntactic metrics.
 - **G8 — Agent-first ergonomics.** One command, `dmetrics analyze [targets…] --json`, over any mix of files and directories, mirroring `dart analyze`. JSON output includes a _contributor breakdown_ (which constructs produced the score, with spans) so an LLM gets an actionable refactor hint, not just a verdict. Analysis failures (parse errors, unreadable files, bad config) are never confusable with a clean report: distinct exit code, distinct status field (see §7.2).
-- **G9 — Resolved-ready interfaces.** Coupling/dependency metrics are a committed future, so the interfaces already carry: `MetricRequirements { syntactic | resolved }`, structural class/file contexts today and `library` reserved, per-metric `measures` so new scope kinds never leak into old metrics, a structured `detail` slot, a run-level `finish` hook, and engine-side pipeline selection. Adding the resolved pipeline must not change any existing metric, and existing reporters must keep producing a useful generic rendering of new result types.
+- **G9 — Resolved-ready interfaces.** Coupling/dependency metrics are a committed future, so the interfaces already carry: `MetricRequirements { syntactic | directive | resolved }`, structural class/file contexts and a `library` scope opened only when measured, per-metric `measures` so new scope kinds never leak into old metrics, a structured `detail` slot, a run-level `finish` hook, and engine-side pipeline selection. Adding the resolved pipeline must not change any existing metric, and existing reporters must keep producing a useful generic rendering of new result types.
 
 ## 3. Non-goals
 
@@ -99,6 +101,8 @@ class SourceFile {
   final String content;
   final String configRoot; // run-root-relative directory of this file's config group (§8);
                            // globs match `path` relative to `configRoot`, never `path` itself
+  final Uri? packageUri;   // package:<name>/<path under lib> when the file lives under a package's
+                           // lib/, from the nearest pubspec's `name`; how `package:` imports resolve
 }
 
 enum ScopeKind {
@@ -106,13 +110,29 @@ enum ScopeKind {
   file, class_,
   // Measured scopes.
   function, method, getter, setter, operator, constructor, localFunction, closure,
-  // Reserved for the resolved pipeline.
+  // The whole compilation unit of a non-part file. Opened only when a metric lists it in
+  // `measures`; named by the file's package: URI, else its path.
   library,
 }
 
+/// What a metric needs from the engine, cheapest first. One pipeline per run: the most
+/// demanding level any metric asks for. `directive` adds a LibraryIndex over the sources;
+/// `resolved` is not implemented and the engine refuses a run that asks for it.
+enum MetricRequirements { syntactic, directive, resolved }
+
+class RunContext {
+  final AnalysisConfig config;
+  final LibraryIndex? libraries;   // non-null from `directive` up; a syntactic run never builds it
+}
+
+/// Directive resolution over the run's sources: `resolve(uriText, from: libraryName)` gives a
+/// LibraryRef of kind source (one of the run's files), missing (a run package's file that is not
+/// in the run: excluded, generated, absent), external (a dependency), sdk, or invalid.
+class LibraryIndex { … }
+
 abstract class Metric {
   String get id;                          // e.g. 'cyclomatic'
-  MetricRequirements get requirements;    // syntactic | resolved
+  MetricRequirements get requirements;    // syntactic | directive | resolved
   Set<ScopeKind> get measures;            // cyclomatic: the eight measured kinds above
 
   // Run-global knobs this metric reads, keyed `<id>.<knob>`, with their
@@ -140,7 +160,9 @@ abstract class Metric {
   Measurement rollUp(Measurement parent, List<Measurement> children);
 
   // Run-level finalization, after every file has been traversed. Syntactic
-  // metrics return nothing; graph-based resolved metrics emit here.
+  // metrics return nothing; graph-based metrics emit here. A measurement for
+  // a scope the run traversed replaces that scope's measurement for this
+  // metric; one for an unknown scope is reported at run level.
   Iterable<Measurement> finish(RunContext ctx);
 }
 
@@ -236,9 +258,10 @@ Rules this fixes:
 
 The resolved pipeline is not implemented in v1, but these decisions are made _now_ so that coupling/dependency metrics arrive as additions, not amendments:
 
-- **Pipeline selection is engine-internal, and there is exactly one pipeline per run.** Callers pass a metric set; if every metric is `syntactic`, the engine parses without resolution. If any metric is `resolved`, the engine runs the resolved pipeline and _all_ metrics consume its ASTs — syntactic metrics run unchanged over resolved ASTs (that's the compatibility test). Never parse twice.
+- **Pipeline selection is engine-internal, and there is exactly one pipeline per run.** Callers pass a metric set; the engine runs the most demanding level any metric asks for and _all_ metrics consume its ASTs — syntactic metrics run unchanged over a directive or resolved run (that's the compatibility test). Never parse twice. Three levels, cheapest first: `syntactic` parses; `directive` parses and builds a `LibraryIndex` over the source list, which the cost probe showed is enough for import graphs at parse cost; `resolved` (element model) is refused until it exists. **Built 2026-09-12** for `syntactic` and `directive`.
 - **One AST traversal per file; post-traversal finalization is allowed.** Dependency cycles and instability are properties of a graph collected across files. Resolved metrics accumulate during traversal and compute in `finish(RunContext)`. "No additional traversal" constrains AST walks, not algorithms over collected data.
-- **Scope granularity widens, the result model doesn't.** Coupling/instability are per-class and per-library. `class_` is already a context; `library` is reserved. A resolved metric lists them in `measures`; no reporter may assume scopes are function-shaped.
+- **Scope granularity widens, the result model doesn't.** Coupling/instability are per-class and per-library. `class_` is already a context; `library` is a scope: the whole unit of a non-part file, opened only when a metric lists it in `measures`, so function-shaped runs never report a scope nothing measured. While open it is the context of the file's top-level declarations (their JSON `parent`), but ids keep being allocated under the file: a top-level closure's id must not depend on which metrics are in the run. A part opens no library scope; its declarations belong to a library only the whole run can name. No reporter may assume scopes are function-shaped.
+- **`finish` addresses scopes.** A graph metric returns a provisional measurement per library from `onExitScope` and replaces it from `finish` once the graph is complete; the replacement goes through aggregation, suppression and thresholds like any traversal measurement, so a library result has a verdict, counts toward status and exit code, and renders on the generic console line. Only a measurement for a scope the run did not traverse stays a bare run-level measurement.
 - **The event model gains, never mutates.** Resolved metrics receive the same events plus a `ResolvedContext` accessor on `RunContext`/`ScopeContext` (element model, library graph).
 - **`detail` carries structure; reporters degrade gracefully.** Dependency metrics will report edges and cycles in `detail`. The v1 JSON reporter serializes `detail` generically (any JSON-encodable value). The console reporter renders `value` + verdict for any metric and a specialized block only for detail types it knows. Adding a metric with a new `detail` shape must not break either reporter; making it _pretty_ in the console is that metric's job.
 - **Cost honesty.** Resolution is slower and memory-hungry. A single-file target with syntactic metrics must never pay resolution cost. Resolved metrics are a repo-mode / CI concern — which fits, since that's where maintainability questions get asked.
@@ -593,7 +616,7 @@ Globs match the file's path **relative to its config root** with `package:glob` 
 5. **M4 — Field trial.** Run on 2–3 real codebases (a large pub package, work monorepo with several config roots); wire into a real Claude Code session via `CLAUDE.md` as a post-edit step; triage every surprising score as bug-first, knob-second; run the G7 benchmark under its stated conditions; revisit the null-aware-element and initializer decisions with data. **Done 2026-09-11.** 11 own codebases plus 14 GitHub packages in two populations (Dart-team libraries; community apps such as Immich, AppFlowy, LocalSend); thresholds 10/20 kept, precision at fail confirmed on both; two bugs fixed from the trial (parse at the package language version; table-shaped share pooled by family); G7 measured with a ~20× margin; `?x` and initializer decisions closed (§6.1). The `CLAUDE.md` wiring is `make check` ending in `dmetrics analyze lib bin`.
 6. **M5 — Metric #2 (cognitive complexity)** as the architecture proof: it must require zero engine changes beyond registration. (M1's probe makes this a confirmation, not a discovery.) **Done 2026-09-11.** Confirmed: `CognitiveMetric` is registered in `defaultMetrics()` and exported, and nothing else in the engine, config, suppressions, reporters or `stats` changed. Two CLI tests had assumed one registered metric (verdict counts are per result; `stats` lists metrics alphabetically) and were loosened. One seam finding, solved inside the metric: the table-shaped marker pools by contributor family, and a nesting-weighted metric needs families per kind and level (§6.4). Thresholds calibrated over the M4 corpus (§6.4); dmetrics' own config parser was the one self-fail at 25 and was split.
 
-**Radar (post-M5, unscheduled):** baseline file for CI adoption (its matcher consumes `id` and `fingerprint`, §7.3) → resolved-pipeline spike with a first dependency metric (likely import-graph coupling / cycle detection per library, the cheapest resolved win; may need only directive-level analysis) → Martin-style instability/abstractness if the spike holds → editor shell as reviewer tooling. The resolved spike's acceptance test mirrors M5: existing syntactic metrics run unmodified and existing reporters produce a useful rendering of the new results.
+**Radar (post-M5, unscheduled):** baseline file for CI adoption (its matcher consumes `id` and `fingerprint`, §7.3) → resolved-pipeline spike → Martin-style instability/abstractness if the spike holds → editor shell as reviewer tooling. **Spike in progress (2026-09-12):** the cost probe settled the pipeline (directive-level, §9) and the engine seam is built and proven with a throwaway import-count metric (§5.1): pipeline selection, `LibraryIndex`, `library` scope, `finish` addressing scopes; the shipped metrics run unmodified beside it over every fixture and both reporters render the new results untouched. Remaining: the first real dependency metric (import-graph coupling and cycle membership per library) as a shipped metric with its own counting table and thresholds.
 
 ## 9. Open questions
 

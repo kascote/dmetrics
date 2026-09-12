@@ -115,6 +115,9 @@ class ScopeIdAllocator {
 
   ScopeId file() => _claim(path);
 
+  /// The one library a file can define.
+  ScopeId library() => _claim('$path::library');
+
   ScopeId named(ScopeKind kind, String qualifiedName) =>
       _claim('$path::${kind.label}:$qualifiedName');
 

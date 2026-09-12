@@ -22,11 +22,20 @@ class ScopeMeasurements {
 class Driver extends GeneralizingAstVisitor<void> {
   final ss.SourceFile file;
   final String path;
+
+  /// What the file's `library` scope is called: its `package:` URI or its
+  /// path. Also the identity a directive metric resolves edges against.
+  final String libraryName;
   final List<Metric> metrics;
   final bool partial;
 
   final List<ScopeMeasurements> measured = [];
   final ScopeIdAllocator _ids;
+
+  /// Whether any metric asked for `library` scopes. When none did, the unit
+  /// is traversed under the file context exactly as before, so a
+  /// function-shaped run never reports a scope no metric measured.
+  final bool _opensLibrary;
 
   /// Display ordinals for closures, keyed by the owner display name so that
   /// `C.a.<closure#1>` and `C.b.<closure#1>` both read naturally.
@@ -38,7 +47,12 @@ class Driver extends GeneralizingAstVisitor<void> {
     required this.path,
     required this.metrics,
     required this.partial,
-  }) : _ids = ScopeIdAllocator(path);
+    String? libraryName,
+  }) : libraryName = libraryName ?? path,
+       _ids = ScopeIdAllocator(path),
+       _opensLibrary = metrics.any(
+         (m) => m.measures.contains(ScopeKind.library),
+       );
 
   /// Traverses [unit]; results accumulate in [measured] in completion order.
   void run(CompilationUnit unit) {
@@ -75,7 +89,9 @@ class Driver extends GeneralizingAstVisitor<void> {
       return;
     }
 
-    final kind = measuredKindOf(node);
+    final kind = node is CompilationUnit
+        ? _libraryKindOf(node)
+        : measuredKindOf(node);
     if (kind == null) {
       _enterNode(node);
       node.visitChildren(this);
@@ -106,14 +122,38 @@ class Driver extends GeneralizingAstVisitor<void> {
     measured.add(ScopeMeasurements(scope, measurements));
   }
 
+  /// A unit opens a `library` scope when a metric measures libraries and the
+  /// unit is not a part: a part's declarations belong to the library that
+  /// includes it, and which one that is only the whole run knows.
+  ScopeKind? _libraryKindOf(CompilationUnit unit) =>
+      _opensLibrary && !unit.directives.any((d) => d is PartOfDirective)
+      ? ScopeKind.library
+      : null;
+
   ScopeContext _open(AstNode node, ScopeKind kind, ScopeContext parent) {
     final ScopeId id;
     final String qualifiedName;
+    if (kind == ScopeKind.library) {
+      return ScopeContext(
+        id: _ids.library(),
+        kind: kind,
+        parent: parent,
+        span: file.span(0, file.length),
+        qualifiedName: libraryName,
+        partial: partial,
+        fingerprint: fingerprintOf(node),
+      );
+    }
     if (kind == ScopeKind.closure) {
       final owner = _closureOwnerName(node, parent);
       final display = (_displayOrdinals[owner] ?? 0) + 1;
       _displayOrdinals[owner] = display;
-      final (allocated, _) = _ids.closure(parent);
+      // Ids are allocated under the file, not the library, so a top-level
+      // closure keeps the same id whether or not a library metric is in the
+      // run: ids are baseline keys and must not depend on the metric set.
+      final (allocated, _) = _ids.closure(
+        parent.kind == ScopeKind.library ? parent.parent! : parent,
+      );
       id = allocated;
       qualifiedName = _join(owner, '<closure#$display>');
     } else {
@@ -135,7 +175,7 @@ class Driver extends GeneralizingAstVisitor<void> {
   /// variable initializer under a structural context; `C` / `` otherwise.
   String _closureOwnerName(AstNode node, ScopeContext parent) {
     final prefix = _displayPrefix(parent);
-    if (!parent.kind.isStructural) return prefix;
+    if (!parent.kind.isDeclarationContainer) return prefix;
     for (var n = node.parent; n != null; n = n.parent) {
       if (n is VariableDeclaration) return _join(prefix, n.name.lexeme);
       if (measuredKindOf(n) != null || classContextNameOf(n) != null) break;
@@ -143,8 +183,12 @@ class Driver extends GeneralizingAstVisitor<void> {
     return prefix;
   }
 
+  /// Top-level declarations are unqualified whether the unit is traversed
+  /// under the file context or under a `library` scope.
   static String _displayPrefix(ScopeContext ctx) =>
-      ctx.kind == ScopeKind.file ? '' : ctx.qualifiedName;
+      ctx.kind == ScopeKind.file || ctx.kind == ScopeKind.library
+      ? ''
+      : ctx.qualifiedName;
 
   static String _join(String prefix, String name) =>
       prefix.isEmpty ? name : '$prefix.$name';

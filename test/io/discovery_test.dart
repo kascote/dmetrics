@@ -129,6 +129,38 @@ void main() {
     });
   });
 
+  group('package URI', () {
+    test('files under a package lib/ get package:<name>/<path>', () {
+      write('pubspec.yaml', 'name: x\n');
+      write('lib/a.dart', fn);
+      write('lib/src/deep/b.dart', fn);
+      write('bin/t.dart', fn);
+      write('test/t_test.dart', fn);
+      write('pkg/pubspec.yaml', 'name: y\n');
+      write('pkg/lib/c.dart', fn);
+      final d = expand(['lib', 'bin', 'test', 'pkg']);
+      expect(
+        {for (final s in d.sources) s.path: s.packageUri?.toString()},
+        {
+          'bin/t.dart': null,
+          'lib/a.dart': 'package:x/a.dart',
+          'lib/src/deep/b.dart': 'package:x/src/deep/b.dart',
+          'pkg/lib/c.dart': 'package:y/c.dart',
+          'test/t_test.dart': null,
+        },
+      );
+    });
+
+    test('no pubspec or no name means no package URI', () {
+      write('lib/a.dart', fn);
+      write('noname/pubspec.yaml', 'environment:\n  sdk: ^3.0.0\n');
+      write('noname/lib/b.dart', fn);
+      final d = expand(['lib', 'noname']);
+      expect(d.sources.map((s) => s.packageUri), everyElement(isNull));
+      expect(d.sources, hasLength(2));
+    });
+  });
+
   group('config roots', () {
     test('nearest analysis_options.yaml with a dmetrics section', () {
       write('pubspec.yaml', 'name: x\n');

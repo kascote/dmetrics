@@ -103,11 +103,14 @@ Map<ScopeId, (Measurement, List<ScopeId>)> _aggregate(
   return out;
 }
 
+/// Start offset, then end offset. A library spans its whole file, so when a
+/// file is a single declaration the two share a span; the container sorts
+/// first (later kinds in the enum are the wider ones).
 int _byStartThenEnd(ScopeMeasurements a, ScopeMeasurements b) {
-  final c = a.scope.span.start.offset.compareTo(b.scope.span.start.offset);
-  return c != 0
-      ? c
-      : a.scope.span.end.offset.compareTo(b.scope.span.end.offset);
+  final start = a.scope.span.start.offset.compareTo(b.scope.span.start.offset);
+  if (start != 0) return start;
+  final end = a.scope.span.end.offset.compareTo(b.scope.span.end.offset);
+  return end != 0 ? end : b.scope.kind.index.compareTo(a.scope.kind.index);
 }
 
 /// The threshold a result reports: the configured one, else the metric's

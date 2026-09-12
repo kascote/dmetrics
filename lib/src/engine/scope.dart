@@ -14,7 +14,9 @@ enum ScopeKind {
   constructor,
   localFunction,
   closure,
-  // Reserved for the resolved pipeline.
+  // The whole compilation unit of a library (not a part): the scope of
+  // per-library metrics such as import coupling. Opened only when a metric
+  // measures it, so function-shaped runs never grow an extra scope per file.
   library;
 
   /// The scope kinds a function-shaped metric measures in v1.
@@ -31,6 +33,11 @@ enum ScopeKind {
 
   /// Structural contexts never receive scope events in v1.
   bool get isStructural => this == file || this == class_;
+
+  /// Contexts whose direct children are declarations rather than code. A
+  /// closure written in a variable initializer under one of these is named
+  /// after the variable it initializes.
+  bool get isDeclarationContainer => isStructural || this == library;
 
   /// The name used in ids and reports (`method`, `closure`, ...).
   String get label => this == class_ ? 'class' : name;
@@ -90,8 +97,10 @@ class ScopeContext {
     this.fingerprint = '',
   });
 
-  /// The last segment of [qualifiedName].
+  /// The last segment of [qualifiedName]. A library's name is a URI or a
+  /// path whose dots are not qualification, so it is returned whole.
   String get name {
+    if (kind == ScopeKind.library) return qualifiedName;
     final i = qualifiedName.lastIndexOf('.');
     return i < 0 ? qualifiedName : qualifiedName.substring(i + 1);
   }

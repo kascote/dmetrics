@@ -17,11 +17,18 @@ class SourceFile {
   /// package gets.
   final LanguageVersion? languageVersion;
 
+  /// The `package:` URI of this file when it lives under a package's `lib/`
+  /// (`package:dmetrics/src/engine/engine.dart`), else null. Derived from
+  /// the nearest pubspec's `name`; it is how `package:` imports find their
+  /// target among the run's sources without reading a package config.
+  final Uri? packageUri;
+
   const SourceFile({
     required this.path,
     required this.content,
     required this.configRoot,
     this.languageVersion,
+    this.packageUri,
   });
 
   @override
