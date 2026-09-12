@@ -2,7 +2,7 @@ import 'package:dmetrics/dmetrics.dart';
 import 'package:test/test.dart';
 
 void main() {
-  final metrics = [CyclomaticMetric()];
+  final metrics = [CyclomaticMetric().spec];
   LoadedConfig? load(String yaml, {String source = 'analysis_options.yaml'}) =>
       parseDmetricsConfig(yaml, source: source, metrics: metrics);
 

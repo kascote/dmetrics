@@ -8,6 +8,7 @@ import 'package:test/test.dart';
 void main() {
   late Directory tmp;
   final metrics = [CyclomaticMetric()];
+  final specs = [for (final m in metrics) m.spec];
 
   setUp(() => tmp = Directory.systemTemp.createTempSync('dmetrics_io_'));
   tearDown(() => tmp.deleteSync(recursive: true));
@@ -23,7 +24,7 @@ void main() {
   DiscoveredSources expand(List<String> targets, {String? configPath}) =>
       Discovery(
         runRoot: tmp.path,
-        metrics: metrics,
+        metrics: specs,
         configPath: configPath,
       ).expand(targets);
 
@@ -75,7 +76,7 @@ void main() {
         write('pkg/lib/a.dart', fn);
         final inner = Discovery(
           runRoot: p.join(tmp.path, 'pkg', 'lib'),
-          metrics: metrics,
+          metrics: specs,
         );
         final d = inner.expand([p.join(tmp.path, 'pkg')]);
         expect(d.sources.single.path, 'a.dart');

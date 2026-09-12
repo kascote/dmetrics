@@ -1,9 +1,9 @@
 import 'package:analyzer/dart/ast/ast.dart';
 
 import '../config/config.dart';
+import '../config/threshold.dart';
 import 'directives.dart';
 import 'measurement.dart';
-import 'result.dart';
 import 'scope.dart';
 
 /// What a metric needs from the engine, cheapest first. A run has exactly
@@ -57,6 +57,9 @@ abstract class Metric {
   /// documented defaults. The config loader validates values against the
   /// default's type and reports every knob in the JSON `run` section.
   Map<String, Object?> get settingDefaults => const {};
+
+  /// The metric as the config loader sees it.
+  MetricSpec get spec => MetricSpec(id: id, settingDefaults: settingDefaults);
 
   /// Thresholds that apply when no config root sets any. Null means every
   /// verdict is `ok` until a threshold is configured; `thresholds: none` in

@@ -12,9 +12,9 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/syntactic_entity.dart';
 import 'package:analyzer/dart/ast/token.dart';
 
+import '../../config/threshold.dart';
 import '../../engine/measurement.dart';
 import '../../engine/metric.dart';
-import '../../engine/result.dart';
 import '../../engine/scope.dart';
 
 class CyclomaticMetric extends Metric {

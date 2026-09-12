@@ -7,6 +7,7 @@ library;
 
 export 'src/config/config.dart';
 export 'src/config/loader.dart';
+export 'src/config/threshold.dart';
 export 'src/engine/analyze.dart';
 export 'src/engine/directives.dart';
 export 'src/engine/engine.dart';

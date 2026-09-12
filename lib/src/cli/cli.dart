@@ -11,8 +11,8 @@ library;
 import 'package:args/args.dart';
 
 import '../config/loader.dart';
+import '../config/threshold.dart';
 import '../engine/metric.dart';
-import '../engine/result.dart';
 import '../io/analyze_paths.dart';
 import '../report/ansi.dart';
 import '../report/run_result.dart';

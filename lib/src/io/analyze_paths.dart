@@ -29,9 +29,10 @@ RunResult analyzePaths(
   CliOverrides cli = const CliOverrides(),
   String? configPath,
 }) {
+  final specs = [for (final m in metrics) m.spec];
   final discovered = Discovery(
     runRoot: runRoot,
-    metrics: metrics,
+    metrics: specs,
     configPath: configPath,
   ).expand(targets);
   if (discovered.missingTargets.isNotEmpty) {
@@ -42,7 +43,7 @@ RunResult analyzePaths(
 
   final resolved = resolveRun(
     roots: discovered.roots,
-    metrics: metrics,
+    metrics: specs,
     cli: cli,
   );
   final diagnostics = [

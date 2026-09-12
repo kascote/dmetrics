@@ -9,7 +9,6 @@ import 'package:yaml/yaml.dart';
 
 import '../config/config.dart';
 import '../config/loader.dart';
-import '../engine/metric.dart';
 import '../engine/report.dart' show Severity;
 import '../engine/source.dart';
 import '../report/run_result.dart';
@@ -41,7 +40,7 @@ class DiscoveredSources {
 class Discovery {
   /// Absolute run root: paths in the report are relative to it.
   final String runRoot;
-  final List<Metric> metrics;
+  final List<MetricSpec> metrics;
 
   /// `--config`: forces one root (the file's directory) for the whole run.
   final String? configPath;

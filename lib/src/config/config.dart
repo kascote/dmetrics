@@ -4,7 +4,18 @@ library;
 
 import 'package:glob/glob.dart';
 
-import '../engine/result.dart';
+import 'threshold.dart';
+
+/// What the config loader knows about a registered metric: its id and the
+/// run-global settings it accepts, keyed `<id>.<knob>`, each with its
+/// default (whose type is the type a configured value must have). Built from
+/// a metric by the engine, so this layer never depends on the metric model.
+class MetricSpec {
+  final String id;
+  final Map<String, Object?> settingDefaults;
+
+  const MetricSpec({required this.id, this.settingDefaults = const {}});
+}
 
 /// Aggregation policy for closures and local functions (§6.3).
 enum ClosureRollup {

@@ -7,6 +7,7 @@
 library;
 
 import '../config/config.dart';
+import '../config/threshold.dart';
 import '../engine/report.dart';
 import '../engine/result.dart';
 import 'ansi.dart';

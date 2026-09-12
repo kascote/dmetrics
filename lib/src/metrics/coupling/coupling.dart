@@ -25,10 +25,10 @@ library;
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:source_span/source_span.dart' show FileSpan;
 
+import '../../config/threshold.dart';
 import '../../engine/directives.dart';
 import '../../engine/measurement.dart';
 import '../../engine/metric.dart';
-import '../../engine/result.dart';
 import '../../engine/graph.dart';
 import '../../engine/scope.dart';
 

@@ -12,6 +12,7 @@ import '../config/config.dart';
 import '../engine/measurement.dart';
 import '../engine/metric.dart';
 import '../engine/pipeline.dart';
+import '../config/threshold.dart';
 import '../engine/report.dart';
 import '../engine/result.dart';
 import '../engine/scope.dart';

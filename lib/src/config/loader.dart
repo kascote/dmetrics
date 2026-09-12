@@ -28,9 +28,8 @@ library;
 import 'package:source_span/source_span.dart' show SourceSpan;
 import 'package:yaml/yaml.dart';
 
-import '../engine/metric.dart';
-import '../engine/result.dart';
 import 'config.dart';
+import 'threshold.dart';
 
 /// The YAML key the config lives under.
 const configKey = 'dmetrics';
@@ -90,7 +89,7 @@ class LoadedConfig {
 LoadedConfig? parseDmetricsConfig(
   String text, {
   required String source,
-  required List<Metric> metrics,
+  required List<MetricSpec> metrics,
 }) {
   final YamlNode doc;
   try {
@@ -113,11 +112,11 @@ LoadedConfig? parseDmetricsConfig(
 
 class _Parser {
   final String source;
-  final Map<String, Metric> metrics;
+  final Map<String, MetricSpec> metrics;
   final problems = <ConfigProblem>[];
   final runValues = <String, Object?>{};
 
-  _Parser(this.source, List<Metric> metrics)
+  _Parser(this.source, List<MetricSpec> metrics)
     : metrics = {for (final m in metrics) m.id: m};
 
   void problem(String message, YamlNode? node) =>
@@ -213,7 +212,7 @@ class _Parser {
   }
 
   MetricConfig _metricConfig(
-    Metric metric,
+    MetricSpec metric,
     YamlNode node,
     bool allowRunGlobal,
   ) {
@@ -376,7 +375,7 @@ class ResolvedRun {
 /// a problem unless `--set` fixes them (§8).
 ResolvedRun resolveRun({
   required Map<String, LoadedConfig?> roots,
-  required List<Metric> metrics,
+  required List<MetricSpec> metrics,
   CliOverrides cli = const CliOverrides(),
 }) {
   final problems = <ConfigProblem>[
