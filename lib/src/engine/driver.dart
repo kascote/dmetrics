@@ -134,11 +134,15 @@ class Driver extends GeneralizingAstVisitor<void> {
     final ScopeId id;
     final String qualifiedName;
     if (kind == ScopeKind.library) {
+      // From the first token to the end of the file: leading comments are
+      // excluded like a declaration's doc comment, so a license header does
+      // not become the library's location and an `// ignore:` on the line
+      // before the first directive reaches it.
       return ScopeContext(
         id: _ids.library(),
         kind: kind,
         parent: parent,
-        span: file.span(0, file.length),
+        span: file.span(node.beginToken.offset, file.length),
         qualifiedName: libraryName,
         partial: partial,
         fingerprint: fingerprintOf(node),

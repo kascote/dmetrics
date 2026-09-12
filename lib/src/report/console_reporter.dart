@@ -2,7 +2,8 @@
 /// summary. Only warn / fail / suppressed results and diagnostics print by
 /// default; [all] prints every scope. Metric-agnostic: `value` and verdict
 /// for any metric, contributor summary and the table-shaped marker when
-/// there is one.
+/// there is one, plus a note for the one `detail` shape it knows (cycle
+/// membership); any other `detail` is left to the JSON report.
 library;
 
 import '../config/config.dart';
@@ -136,7 +137,17 @@ String _resultLine(
     if (summary.isNotEmpty)
       summary.entries.map((e) => '${e.key} ×${e.value}').join(', '),
     if (table != null) palette.dim('table-shaped: ${table.kind}'),
+    ?_detailNote(r.measurement.detail),
   ].join(' • ');
+}
+
+/// `cycle of 3` when a dependency metric reports the scope as a member of an
+/// import cycle: `detail.cycle` lists the members, this scope included.
+String? _detailNote(Object? detail) {
+  if (detail is! Map) return null;
+  final cycle = detail['cycle'];
+  if (cycle is! List || cycle.length < 2) return null;
+  return 'cycle of ${cycle.length}';
 }
 
 String _n(int count, String noun) => '$count $noun${count == 1 ? '' : 's'}';

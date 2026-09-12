@@ -73,10 +73,10 @@ void main() {
       final r = run(['analyze']);
       expect(r.code, 0);
       expect(r.err, isEmpty);
-      // One `ok` per metric result: every registered metric measures the scope.
+      // The function and the library it sits in; one `ok` per metric result.
       expect(
         r.out,
-        '1 scope in 1 file • 0 fail, 0 warn, ${defaultMetrics().length} ok, '
+        '2 scopes in 1 file • 0 fail, 0 warn, ${defaultMetrics().length} ok, '
         '0 suppressed • status: ok\n',
       );
     });
@@ -150,8 +150,10 @@ void main() {
         'ok',
         'errors',
       ]);
-      final scope =
-          ((json['files'] as List).first['scopes'] as List).single as Map;
+      final scopes = (json['files'] as List).first['scopes'] as List;
+      final scope = scopes.cast<Map<String, Object?>>().singleWhere(
+        (s) => s['kind'] == 'function',
+      );
       expect(
         (scope['results'] as Map)['cyclomatic'],
         isNot(contains('contributors')),

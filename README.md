@@ -6,9 +6,11 @@ constructors, local functions, closures), compares each value against
 thresholds you configure, and prints one consolidated report as console text
 or JSON.
 
-Two metrics ship today: **cyclomatic complexity** and **cognitive
-complexity**. The engine is built so that more metrics register without
-touching it; the second one proved it.
+Three metrics ship today: **cyclomatic complexity** and **cognitive
+complexity** per function-shaped scope, and **import coupling** per library.
+The engine is built so that more metrics register without touching it; the
+second one proved it, and the third added a scope kind and a detail payload
+without changing the first two.
 
 ## Quick start
 
@@ -45,6 +47,7 @@ lib/src/config/loader.dart:372:1 • fail • function resolveRun • cyclomatic
 | `[warn ≥ 10, fail ≥ 20]` | The thresholds that applied. Absent when none is configured.                |
 | `loop ×8, if ×7, ...`    | Contributor summary: which constructs produced the score.                   |
 | `table-shaped: case`     | One kind supplies ≥ 70% of the score (and ≥ 8 in total): a dispatch table, a field-wise `==`, a `copyWith`. Its size is the table's, not a tangle's. `case` pools `pattern-or` and `when`: a guarded arm is still one arm. For cognitive the family is a kind at a nesting level: `table-shaped: if@1` means the score is mostly `if`s one level down (a `switch` whose arms each hold a run of `if`s), `if` alone means `if`s at the top of the body. See below. |
+| `cycle of 3`             | On a `library` line: the library is in an import cycle of that many libraries of the run. The members are in the JSON `detail`. |
 
 By default only `warn`, `fail` and `suppressed` scopes are printed, followed
 by a one-line summary. `--all` prints every scope. The summary ends with the
@@ -85,6 +88,8 @@ dmetrics:
       count_null_coalescing: true # run-global knob
     cognitive:
       thresholds: { warn: 15, fail: 25 } # the built-in default
+    coupling:
+      thresholds: { warn: 15, fail: 30 } # the built-in default
   overrides: # thresholds and enablement only; last match wins
     - paths: ["test/**"]
       metrics:
@@ -122,7 +127,10 @@ Cyclomatic ships with `warn: 10, fail: 20` built in, chosen from a field
 trial over eleven codebases where 10 sat near the 90th–95th percentile of
 scope scores and 20 flagged only real tangles. Cognitive ships with
 `warn: 15, fail: 25`, calibrated over the same corpus to the same prevalence
-(SonarSource's own default is 15). `thresholds: none` turns thresholds off
+(SonarSource's own default is 15). Coupling ships with `warn: 15, fail: 30`:
+15 is about the 95th percentile of libraries in fourteen packages, and 30
+flagged only hubs (`theme_data.dart`, `router.dart`, a composition root).
+`thresholds: none` turns thresholds off
 for a metric in that root; `dmetrics stats` shows where your own codebase sits
 before you tune them.
 
@@ -401,6 +409,39 @@ nest and keep their plain kind. So:
 
 The score is unchanged either way; the marker is a reading hint.
 
+## Import coupling rules
+
+Per library, the number of distinct libraries **of your own packages** that
+the library's code imports. Base 0. The scope is the whole file (kind
+`library`, named by its `package:` URI); a `part` file has no scope of its
+own. The rule: count what the library's code can break on.
+
+| Directive                                                        | Δ                            | Kind     |
+| ---------------------------------------------------------------- | ---------------------------- | -------- |
+| `import` of a library of one of the analyzed packages            | +1 per distinct target       | `import` |
+| A second `import` of the same library (`show`, `hide`, a prefix) | 0                            | —        |
+| `export`                                                         | 0 (an edge, listed in detail) | —        |
+| `import 'dart:…'`, `import 'package:other/…'`                    | 0 (external, listed in detail) | —      |
+| `import 'a.dart' if (dart.library.io) 'b.dart'`                  | +1 for the default URI       | `import` |
+| `part 'p.dart'` whose part has its own imports                   | +1 per library the part adds | `part`   |
+
+A target counts whether or not it is in the run: `dmetrics analyze
+lib/src/a.dart` gives `a.dart` the same number as `dmetrics analyze lib`.
+Re-exports are not counted because a barrel file has a package's API surface,
+not its coupling; they still are edges, so a barrel takes part in cycles and
+appears among its targets' dependents.
+
+The JSON `detail` of a library result is the graph: `dependencies` (counted),
+`missing` (counted but not in the run: excluded, generated, absent),
+`exports`, `external`, `dependents` (which run libraries import or export
+this one), and `cycle` when the library is in an import cycle (the members,
+itself included). Cycles are reported, not judged: most of every mature
+package sits in one, so a verdict on membership would flag everything. The
+console prints `cycle of N` on the library's line.
+
+No knobs. The table-shaped marker never fires for this metric: an import
+list is what it counts.
+
 ## JSON report
 
 `--json` writes a single document with `schemaVersion`, `tool`, `status`,
@@ -409,8 +450,10 @@ the effective `configs` per root and `run`-global settings, a `summary`
 and `files[]`. Each file carries its `configRoot`, its own `status` and parse
 `diagnostics`, and `scopes[]` with the scope's id, kind, qualified name, span,
 measured value, rolled-up value, applied threshold, verdict, suppression, and
-every contributor with its span. Ordering is deterministic: configs by root,
-files by path, scopes by start offset, contributors by start offset.
+every contributor with its span. A `library` scope's coupling result also
+carries `detail` (the import graph, see above). Ordering is deterministic:
+configs by root, files by path, scopes by start offset, contributors by start
+offset.
 
 The full specimen and its guarantees are in `SPEC.md` §7.3, and
 `test/golden/report.json` is the golden rendering of it.
@@ -434,8 +477,10 @@ UPDATE_GOLDENS=1 dart test test/report/json_golden_test.dart   # regenerate the 
 
 Metric behaviour is specified by annotated fixtures under `test/fixtures`:
 each scope carries `// expect: cyclomatic=N` (and `rolled=M` where roll-up
-differs) and the harness asserts every scope plus the invariant
-`measured == 1 + Σ contributors`.
+differs) and the harness asserts every scope plus each metric's invariant
+(`measured == base + Σ contributors`). What a single file cannot show
+(import edges between files, cycles, parts) is covered by in-memory graph
+tests under `test/metrics`.
 
 The design document is `SPEC.md`. Section numbers referenced in source
 comments (§6.1, §7.2, §8) point there.
