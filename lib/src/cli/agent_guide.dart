@@ -1,0 +1,98 @@
+/// The text `dmetrics agent` prints: how an LLM agent should run the tool
+/// and read its output.
+///
+/// The guide ships inside the binary rather than in a hand-maintained
+/// CLAUDE.md or skill so it can never drift from the output it explains;
+/// `init` renders this same text into whatever shape a project wants.
+/// It is written for a reader that has a report in front of it and needs
+/// to decide what to do, so it front-loads the traps a report line does not
+/// explain by itself: contributor counts that do not sum to the value,
+/// closures measured as scopes of their own, the same switch reading as
+/// `case ×15` in one metric and `switch ×1` in the other.
+library;
+
+import '../version.dart';
+
+const agentGuide =
+    '''
+$toolName — how to use and read it
+
+$toolName measures Dart code and judges each value against thresholds the
+project configured. It measures; it does not fix. Warnings are evidence to
+weigh, not orders to obey.
+
+When to run
+  Once per task, after your edits, on the package's source roots:
+    $toolName analyze lib bin      (or the project's `make check`)
+  Do not run it after every edit. Run it on a single file only when you
+  want to compare before and after a refactor of that file.
+  Exit 0 clean • 1 violations • 2 analysis incomplete (fix those first:
+  parse errors, unreadable files, bad config) • 3 usage error.
+
+Reading a report line
+  lib/a.dart:42:3 • warn • method Foo.bar • cognitive 18 [warn ≥ 15, fail ≥ 25] • if ×4, loop ×2, else ×3
+  where • verdict • scope kind and name • metric and value • thresholds that
+  applied • contributors: which constructs produced the score, in source
+  order. Only warn, fail and suppressed lines print; the last line is the
+  summary. `--all` prints every scope. `--json` gives the same data
+  structured. No thresholds configured means every scope is ok: nothing
+  is judged.
+  Counts are occurrences, not points. For cyclomatic they sum to value − 1.
+  For cognitive nested constructs cost more, so counts do not sum to the
+  value; the gap is the nesting.
+  Closures are scopes of their own: a warning on `build.<closure#2>` points
+  at the second closure inside `build`, and `build` itself may read ok.
+  Less obvious labels: `if-case` is `if (x case p)`, `when` a case guard,
+  `pattern-or` a `||` inside a pattern, `loop` any for/while/do.
+
+The metrics
+  cyclomatic  Number of independent paths through a scope: every branch,
+              loop, case arm, &&, ||, ??, ?: and catch adds one. Measures
+              how much there is to test.
+  cognitive   How hard the scope is to read: nesting makes each construct
+              cost more, sequences of the same construct cost less. A
+              switch counts once here but once per arm in cyclomatic, so
+              the same code reads `switch ×1` and `case ×15`. Measures how
+              much there is to understand.
+  coupling    Per library: how many other libraries of this package it
+              imports. `dart:` and other packages do not count; exports do
+              not count. Measures how much can break it when the package
+              changes. `cycle of N` on the line means an import cycle.
+
+What to do about a warning
+  1. Read the contributors before the value. `case ×15` and `if ×8, loop ×5`
+     at the same value are different problems.
+  2. `table-shaped: <kind>` means one kind supplies most of the score: a
+     dispatch switch, a field-wise ==, a copyWith, a parser step. Its size
+     is the table's, not a tangle's. `if@1` means the ifs sit one level
+     down, typically a switch whose arms each hold a run of ifs. Usually
+     leave it; suppress if it must be silent.
+  3. A scope your task did not touch is not your problem. Mention it,
+     do not fix it, unless the user asked for a cleanup.
+  4. A scope your task touched and pushed over a threshold: prefer splitting
+     by responsibility (extract the deepest nested block, or the guard
+     clauses) over splitting to hit the number. If the honest shape is one
+     long function, say so and suppress with the reason next to it.
+  5. Never lower a threshold or add an override to make a run pass.
+     Thresholds are the project's decision; propose the change instead.
+
+Suppressing
+  // ignore: dmetrics_cognitive        on the line before the declaration
+  // ignore: dmetrics                  every metric
+  // ignore_for_file: dmetrics_coupling
+  A suppression on a method does not cover its closures. Suppressed scopes
+  still print, so nothing is hidden.
+
+Other commands
+  $toolName stats [paths]   Distribution, share above thresholds, a sweep
+                           over candidate thresholds, contributor mix.
+                           For calibrating thresholds, not for finding
+                           violations. Read p90/p95 against the warn line.
+  $toolName deps [paths]    The package as a graph: cycles, fan-out and
+                           fan-in hubs with instability I = out/(in+out),
+                           and the graph folded onto directories with the
+                           edges that break the layering marked. Cycles
+                           and hubs are information, not violations; a
+                           barrel file is a normal fan-in hub. Complete
+                           only when the whole package is in the run.
+''';

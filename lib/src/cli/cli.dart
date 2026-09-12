@@ -1,7 +1,8 @@
 /// `dmetrics analyze [<file>|<dir> ...] [--json] [--config <path>]
 /// [--fail-on warn|fail] [--set <key>=<value>] [--threshold <spec>]` (§7.1),
 /// and `dmetrics stats` / `dmetrics deps` with the same targets and config
-/// handling.
+/// handling. `dmetrics agent` takes no targets: it prints the guide an LLM
+/// agent reads before interpreting a report.
 ///
 /// Exit codes (§7.2): 0 clean, 1 violations, 2 analysis incomplete, 3 usage.
 /// `stats` and `deps` never exit 1: violations are their subject, not their
@@ -24,6 +25,7 @@ import '../report/deps.dart';
 import '../report/json_reporter.dart';
 import '../report/stats.dart';
 import '../version.dart';
+import 'agent_guide.dart';
 
 const exitUsage = 3;
 
@@ -126,6 +128,11 @@ String usage([String? command]) => switch (command) {
         'over candidate thresholds, the contributor mix and sibling clusters\n'
         '(same value and contributor mix). For calibrating thresholds.\n\n'
         '${buildStatsParser().usage}\n\n$_exitCodes',
+  'agent' =>
+    'Usage: $toolName agent\n\n'
+        'Prints the guide for an LLM agent working in a project that uses\n'
+        '$toolName: when to run it, how to read a report line, what each\n'
+        'metric measures and what to do about a warning. No options.',
   'deps' =>
     'Usage: $toolName deps [<file>|<dir> ...] [options]\n\n'
         'Measures the same way analyze does, then prints the dependency graph\n'
@@ -137,12 +144,14 @@ String usage([String? command]) => switch (command) {
   _ =>
     'Usage: $toolName analyze [<file>|<dir> ...] [options]\n'
         '       $toolName stats   [<file>|<dir> ...] [options]\n'
-        '       $toolName deps    [<file>|<dir> ...] [options]\n\n'
+        '       $toolName deps    [<file>|<dir> ...] [options]\n'
+        '       $toolName agent\n\n'
         'analyze  Measure code metrics and print one consolidated report.\n'
         'stats    Distribution, threshold shares, sweep, contributor mix and\n'
         '         sibling clusters per metric, for calibrating thresholds.\n'
         'deps     The dependency graph of the run: cycles, hubs by fan-out\n'
-        '         and fan-in, and the graph folded onto directories.\n\n'
+        '         and fan-in, and the graph folded onto directories.\n'
+        'agent    The guide an LLM agent reads before interpreting a report.\n\n'
         'Run `$toolName <command> --help` for the command\'s options.\n\n'
         '$_exitCodes',
 };
@@ -159,14 +168,8 @@ int runCli(
   bool stdoutIsTerminal = false,
   Map<String, String> environment = const {},
 }) {
-  if (args.isEmpty || args.first == '--help' || args.first == '-h') {
-    (args.isEmpty ? err : out).writeln(usage());
-    return args.isEmpty ? exitUsage : 0;
-  }
-  if (args.first == '--version') {
-    out.writeln('$toolName $toolVersion');
-    return 0;
-  }
+  final early = _answerWithoutAnalysis(args, out, err);
+  if (early != null) return early;
   final command = args.first;
   if (!const {'analyze', 'stats', 'deps'}.contains(command)) {
     err.writeln('Unknown command `$command`.\n\n${usage()}');
@@ -216,6 +219,45 @@ int runCli(
     'deps' => _emitDeps(parsed, result, out, palette),
     _ => _emitReport(parsed, result, out, palette),
   };
+}
+
+/// The invocations that need no analysis: usage, `--version` and `agent`.
+/// Returns the exit code, or null when [args] name a command that runs.
+int? _answerWithoutAnalysis(List<String> args, StringSink out, StringSink err) {
+  if (args.isEmpty) {
+    err.writeln(usage());
+    return exitUsage;
+  }
+  switch (args.first) {
+    case '--help' || '-h':
+      out.writeln(usage());
+      return 0;
+    case '--version':
+      out.writeln('$toolName $toolVersion');
+      return 0;
+    case 'agent':
+      return _emitAgentGuide(args.sublist(1), out, err);
+    default:
+      return null;
+  }
+}
+
+/// `agent` has no options and no targets, so anything after it but `--help`
+/// is a usage error: a stray path would silently print the guide instead of
+/// telling the caller they meant `analyze`.
+int _emitAgentGuide(List<String> rest, StringSink out, StringSink err) {
+  if (rest.isEmpty) {
+    out.write(agentGuide);
+    return 0;
+  }
+  if (rest.length == 1 && (rest.first == '--help' || rest.first == '-h')) {
+    out.writeln(usage('agent'));
+    return 0;
+  }
+  err.writeln(
+    '`agent` takes no arguments, got `${rest.join(' ')}`.\n\n${usage('agent')}',
+  );
+  return exitUsage;
 }
 
 ArgParser _parserFor(String command) => switch (command) {

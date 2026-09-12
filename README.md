@@ -183,7 +183,14 @@ roots.
 dmetrics analyze [<file>|<dir> ...] [options]
 dmetrics stats   [<file>|<dir> ...] [options]
 dmetrics deps    [<file>|<dir> ...] [options]
+dmetrics agent
 ```
+
+`dmetrics agent` prints a guide for an LLM coding agent working in a project
+that uses dmetrics: when to run it, how to read a report line, what each
+metric measures and what to do about a warning. It ships inside the binary so
+it never drifts from the output it explains; point your CLAUDE.md or AGENTS.md
+at it.
 
 No targets means the current directory. Files and directories mix freely.
 Files named explicitly are analyzed even if `include`/`exclude` would skip

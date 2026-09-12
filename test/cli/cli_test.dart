@@ -43,6 +43,8 @@ void main() {
         ['deps', '--fail-on', 'warn'],
         ['deps', '--top', '0'],
         ['deps', '--depth', 'two'],
+        ['agent', 'lib'],
+        ['agent', '--json'],
       ]) {
         final r = run(args);
         expect(r.code, exitUsage, reason: '$args');
@@ -57,13 +59,41 @@ void main() {
       expect(top.out, contains('$toolName analyze'));
       expect(top.out, contains('$toolName stats'));
       expect(top.out, contains('$toolName deps'));
+      expect(top.out, contains('$toolName agent'));
       expect(
         run(['analyze', '-h']).out,
         startsWith('Usage: $toolName analyze'),
       );
       expect(run(['stats', '-h']).out, startsWith('Usage: $toolName stats'));
       expect(run(['deps', '-h']).out, startsWith('Usage: $toolName deps'));
+      expect(run(['agent', '-h']).out, startsWith('Usage: $toolName agent'));
       expect(run(['--version']).out, '$toolName $toolVersion\n');
+    });
+
+    test('agent prints the guide and touches no files', () {
+      final r = run(['agent']);
+      expect(r.code, 0);
+      expect(r.err, isEmpty);
+      expect(r.out, startsWith('$toolName — how to use and read it\n'));
+      // The sections a reader navigates by, and the traps the guide exists
+      // to explain: the same suppression syntax the engine accepts, and the
+      // exit codes the CLI actually returns.
+      for (final needle in [
+        'When to run',
+        'Reading a report line',
+        'The metrics',
+        'What to do about a warning',
+        'Suppressing',
+        'Other commands',
+        '// ignore: dmetrics_cognitive',
+        '// ignore_for_file: dmetrics_coupling',
+        'table-shaped',
+        '<closure#2>',
+        'Exit 0 clean • 1 violations • 2 analysis incomplete',
+      ]) {
+        expect(r.out, contains(needle), reason: needle);
+      }
+      expect(tmp.listSync(), isEmpty);
     });
 
     test('a missing target is exit 3 without usage noise', () {
