@@ -16,10 +16,11 @@ help: ## Show this help message
 	@echo 'Available targets:'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 
-check: ## Lint, verify formatting, run all tests (what CI runs)
+check: ## Lint, verify formatting, run all tests, check code metrics (what CI runs)
 	dart analyze
 	dart format --output=none --set-exit-if-changed $(FORMAT_PATHS)
 	dart test -r failures-only
+	dart run bin/dmetrics.dart analyze lib bin
 
 self: ## Measure dmetrics with itself (stats over lib)
 	dart run bin/dmetrics.dart stats lib

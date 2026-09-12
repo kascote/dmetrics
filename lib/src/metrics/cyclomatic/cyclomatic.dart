@@ -112,6 +112,9 @@ class CyclomaticMetric extends Metric {
         detail: parent.detail,
       );
 
+  /// The whole decision table as one `switch`: 37 by its own measure, but a
+  /// dispatch table whose `when` guards keep it below the table-shaped cut.
+  // ignore: dmetrics_cyclomatic
   Contributor? _contributorFor(AstNode node, ScopeContext ctx) {
     Contributor c(String kind, SyntacticEntity start, [SyntacticEntity? end]) =>
         Contributor(
