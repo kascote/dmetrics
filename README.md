@@ -198,8 +198,8 @@ the project's instructions file between `<!-- dmetrics:start -->` and
 rest of the file alone. Without `--file` it uses the first of `CLAUDE.md` and
 `AGENTS.md` that exists, creating `CLAUDE.md` when neither does; `--file` names
 the file explicitly and repeats. The block tells the agent to run `dmetrics
-analyze` once per task and to read `dmetrics agent` before interpreting a
-report. `--skill claude` also writes the guide as a skill at
+analyze` on the package's source roots once per task and to read `dmetrics
+agent` before interpreting a report. `--skill claude` also writes the guide as a skill at
 `.claude/skills/dmetrics/SKILL.md`, and `--skill codex` at
 `.agents/skills/dmetrics/SKILL.md`, for projects that want it loaded without
 the extra command. Both agents read the same SKILL.md format, so the two files

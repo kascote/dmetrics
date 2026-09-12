@@ -28,17 +28,11 @@ void main() {
     expect(text, startsWith('$blockStart\n'));
     expect(text, endsWith('$blockEnd\n'));
     expect(blockStart.allMatches(text).length, 1);
-    // No lib or bin here, so the command carries no targets.
-    expect(text, contains('\n    dmetrics analyze\n'));
+    // The rule for what to measure, not a command detected at init time.
+    expect(text, contains('\n    dmetrics analyze [<file>|<dir> ...]\n'));
+    expect(text, contains('`lib`, plus `bin` when it has one'));
     expect(text, contains('`dmetrics agent`'));
     expect(text, isNot(contains('skill')));
-  });
-
-  test('names the source roots that exist', () {
-    Directory(p.join(tmp.path, 'lib')).createSync();
-    Directory(p.join(tmp.path, 'bin')).createSync();
-    run(['init']);
-    expect(read('CLAUDE.md'), contains('\n    dmetrics analyze lib bin\n'));
   });
 
   test('appends after existing text and replaces its own block on re-run', () {

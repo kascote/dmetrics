@@ -73,7 +73,7 @@ String runInit(ArgResults parsed, {required String runRoot}) {
   }
   final skills = parsed.multiOption('skill');
   final files = parsed.multiOption('file');
-  final block = _block(runRoot, skills.isNotEmpty);
+  final block = _block(skills.isNotEmpty);
   final lines = [
     for (final file
         in files.isEmpty ? [_defaultInstructionsFile(runRoot)] : files)
@@ -128,17 +128,10 @@ String _writeSkill(File file) {
   return existed ? 'updated' : 'written';
 }
 
-/// The command the block tells the agent to run: the package's source roots
-/// that exist, so the line works as written in that project.
-String _analyzeCommand(String runRoot) {
-  final roots = [
-    'lib',
-    'bin',
-  ].where((d) => Directory(p.join(runRoot, d)).existsSync());
-  return [toolName, 'analyze', ...roots].join(' ');
-}
-
-String _block(String runRoot, bool withSkill) =>
+/// The block states the rule for what to measure instead of a command
+/// detected at init time: a detected `lib bin` goes stale the day `bin`
+/// appears, and a rule the agent applies each run never does.
+String _block(bool withSkill) =>
     '''
 $blockStart
 ## Code metrics — $toolName
@@ -148,7 +141,11 @@ complexity per function, import coupling per library) against thresholds in
 `analysis_options.yaml`. Run it once per task, after your edits, not after
 every edit:
 
-    ${_analyzeCommand(runRoot)}
+    $toolName analyze [<file>|<dir> ...]
+
+Pass the package's source roots: `lib`, plus `bin` when it has one. With no
+targets it measures the current directory, tests and fixtures included, which
+is usually more than you want.
 
 Exit 0 is clean, 1 means violations, 2 means the analysis did not complete
 (fix that first). Before interpreting a report, run `$toolName agent`: it
