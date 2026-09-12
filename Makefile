@@ -8,7 +8,7 @@ BIN     = build/dmetrics
 
 # Fixture files under test/**/fixtures are metric inputs; some are deliberately
 # unparseable, so a tree-wide `dart format .` fails. Format everything else.
-FORMAT_PATHS = lib bin $(shell find test -name '*.dart' -not -path '*/fixtures/*')
+FORMAT_PATHS = lib bin tool $(shell find test -name '*.dart' -not -path '*/fixtures/*')
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'

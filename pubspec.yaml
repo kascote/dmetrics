@@ -17,4 +17,5 @@ dependencies:
 
 dev_dependencies:
   lints: ^6.0.0
+  package_config: ^2.1.0 # tool/resolve_probe.dart
   test: ^1.32.0
