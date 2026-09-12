@@ -159,4 +159,51 @@ int f(int a) => a > 0 ? (a > 1 && a > 2 ? 1 : 2) : 3;
       greaterThanOrEqualTo(1),
     );
   });
+
+  group('table shape', () {
+    test(
+      'a guarded switch is one table: when and pattern-or pool with case',
+      () {
+        final r = resultOf('''
+String f(Object o) => switch (o) {
+  int n when n > 0 => 'p',
+  int n when n < 0 => 'n',
+  int() => 'z',
+  String s when s.isEmpty => 'e',
+  String() || Symbol() => 's',
+  List() when o.isNotEmpty => 'l',
+  List() => 'el',
+  _ => 'x',
+};
+''');
+        final shape = r.measurement.tableShape!;
+        expect(shape.kind, 'case');
+        expect(shape.share, 1);
+        // Reporters still see the kinds; only the pooling changed.
+        expect(r.measurement.contributorSummary, {
+          'case': 7,
+          'when': 4,
+          'pattern-or': 1,
+        });
+      },
+    );
+
+    test('a switch mixed with ifs is a tangle, not a table', () {
+      final r = resultOf('''
+int f(Object o, int a) {
+  if (a > 0) return 1;
+  if (a > 1) return 2;
+  if (a > 2) return 3;
+  if (a > 3) return 4;
+  return switch (o) {
+    int n when n > 0 => 5,
+    int() => 6,
+    String() => 7,
+    _ => 8,
+  };
+}
+''');
+      expect(r.measurement.tableShape, isNull);
+    });
+  });
 }

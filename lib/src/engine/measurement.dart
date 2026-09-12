@@ -31,23 +31,29 @@ class Measurement {
     return out;
   }
 
-  /// The one contributor kind that supplies nearly the whole score, or null.
+  /// The one contributor family that supplies nearly the whole score, or
+  /// null.
   ///
-  /// A scope is table-shaped when a single kind accounts for at least
+  /// A scope is table-shaped when a single family accounts for at least
   /// [TableShape.minShare] of the summed increments and the scope has at
   /// least [TableShape.minIncrements] of increment in total: a `switch`
   /// dispatch, a field-wise `==`, a `copyWith` of `??`s. Its score is the
   /// size of a table, not the tangle of a control flow, which is a reading
   /// hint for consumers, not a change in how anything is counted.
+  ///
+  /// Pooling by [Contributor.family] rather than kind is what keeps a
+  /// guarded switch table-shaped: its `when` guards and or-patterns are arms
+  /// of the same table, and counting them as separate kinds split the share
+  /// below the cut on every real one the field trial found.
   TableShape? get tableShape {
-    final byKind = <String, num>{};
+    final byFamily = <String, num>{};
     num total = 0;
     for (final c in contributors) {
-      byKind[c.kind] = (byKind[c.kind] ?? 0) + c.increment;
+      byFamily[c.family] = (byFamily[c.family] ?? 0) + c.increment;
       total += c.increment;
     }
     if (total < TableShape.minIncrements) return null;
-    for (final e in byKind.entries) {
+    for (final e in byFamily.entries) {
       final share = e.value / total;
       if (share >= TableShape.minShare) {
         return TableShape(kind: e.key, share: share);
@@ -66,6 +72,8 @@ class TableShape {
   static const minShare = 0.7;
   static const minIncrements = 8;
 
+  /// The dominant [Contributor.family]; the kind itself for kinds that are
+  /// not pooled.
   final String kind;
 
   /// Fraction of the summed increments [kind] supplies, in `[minShare, 1]`.
@@ -79,8 +87,14 @@ class TableShape {
 
 /// One construct that produced part of a score.
 class Contributor {
-  /// Stable vocabulary defined by the metric (for cyclomatic: §6.1).
+  /// Stable vocabulary defined by the metric; what reporters show.
   final String kind;
+
+  /// The group [tableShape] pools this kind with. Defaults to [kind]; a
+  /// metric names a family when several of its kinds are one construct
+  /// written in pieces, so that a scope built from all of them is still
+  /// read as a table.
+  final String family;
   final num increment;
   final FileSpan span;
 
@@ -88,7 +102,8 @@ class Contributor {
     required this.kind,
     required this.increment,
     required this.span,
-  });
+    String? family,
+  }) : family = family ?? kind;
 
   @override
   String toString() => '$kind(+$increment @${span.start.offset})';

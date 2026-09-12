@@ -112,13 +112,20 @@ class CyclomaticMetric extends Metric {
         detail: parent.detail,
       );
 
-  /// The whole decision table as one `switch`: 37 by its own measure, but a
-  /// dispatch table whose `when` guards keep it below the table-shaped cut.
+  /// Kinds pooled for the table-shaped marker. A `switch` arm is one
+  /// increment for its pattern, one more per `||` in it and one for its
+  /// `when` guard; all three are that arm, so a table of guarded arms is
+  /// still one table.
+  static const _families = {'pattern-or': 'case', 'when': 'case'};
+
+  /// The whole decision table as one `switch`: 37 by its own measure and
+  /// marked table-shaped, but the marker never changes a verdict.
   // ignore: dmetrics_cyclomatic
   Contributor? _contributorFor(AstNode node, ScopeContext ctx) {
     Contributor c(String kind, SyntacticEntity start, [SyntacticEntity? end]) =>
         Contributor(
           kind: kind,
+          family: _families[kind],
           increment: 1,
           span: ctx.spanOfRange(start.offset, (end ?? start).end),
         );
