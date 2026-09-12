@@ -84,6 +84,51 @@ void main() {
     );
   });
 
+  group('language version', () {
+    test('the sdk lower bound of the nearest pubspec, per package', () {
+      write('pubspec.yaml', 'name: x\nenvironment:\n  sdk: ^3.12.0\n');
+      write('lib/a.dart', fn);
+      write(
+        'pkg/pubspec.yaml',
+        "name: y\nenvironment:\n  sdk: '>=3.0.0 <4.0.0'\n",
+      );
+      write('pkg/lib/deep/b.dart', fn);
+      final d = expand(['lib', 'pkg']);
+      expect(
+        {for (final s in d.sources) s.path: s.languageVersion},
+        {
+          'lib/a.dart': LanguageVersion(3, 12),
+          'pkg/lib/deep/b.dart': LanguageVersion(3, 0),
+        },
+      );
+    });
+
+    test('no pubspec, no sdk entry, or a broken pubspec means latest', () {
+      write('lib/a.dart', fn);
+      write('noenv/pubspec.yaml', 'name: x\n');
+      write('noenv/lib/b.dart', fn);
+      write('broken/pubspec.yaml', 'environment: [\n');
+      write('broken/lib/c.dart', fn);
+      final d = expand(['lib', 'noenv', 'broken']);
+      expect(d.sources.map((s) => s.languageVersion), everyElement(isNull));
+      expect(d.sources, hasLength(3));
+    });
+
+    test('the language version does not depend on the config root', () {
+      // A dmetrics section below the package root makes `lib` the config
+      // root; the language version still comes from the package's pubspec.
+      write('pubspec.yaml', 'name: y\nenvironment:\n  sdk: ^3.8.0\n');
+      write(
+        'lib/analysis_options.yaml',
+        'dmetrics:\n  metrics:\n    cyclomatic: {thresholds: {warn: 3}}\n',
+      );
+      write('lib/a.dart', fn);
+      final d = expand(['lib']);
+      expect(d.sources.single.configRoot, 'lib');
+      expect(d.sources.single.languageVersion, LanguageVersion(3, 8));
+    });
+  });
+
   group('config roots', () {
     test('nearest analysis_options.yaml with a dmetrics section', () {
       write('pubspec.yaml', 'name: x\n');

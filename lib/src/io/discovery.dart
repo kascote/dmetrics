@@ -5,6 +5,7 @@ library;
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'package:yaml/yaml.dart';
 
 import '../config/config.dart';
 import '../config/loader.dart';
@@ -47,6 +48,8 @@ class Discovery {
 
   final _dirRoots = <String, _Root>{};
   final _parsedFiles = <String, LoadedConfig?>{};
+  final _dirVersions = <String, LanguageVersion?>{};
+  final _pubspecVersions = <String, LanguageVersion?>{};
 
   Discovery({required String runRoot, required this.metrics, this.configPath})
     : runRoot = p.normalize(p.absolute(runRoot));
@@ -99,6 +102,7 @@ class Discovery {
             path: rel,
             content: File(abs).readAsStringSync(),
             configRoot: rootRel,
+            languageVersion: _languageVersionFor(p.dirname(abs)),
           ),
         );
       } on FileSystemException catch (e) {
@@ -168,6 +172,54 @@ class Discovery {
       _dirRoots[d] = root;
     }
     return root;
+  }
+
+  /// The language version of the package containing [dir]: the `sdk` lower
+  /// bound of the nearest `pubspec.yaml` up the tree, independent of the
+  /// config root (a `dmetrics:` section may sit above or below the package).
+  /// Null outside any package or when the pubspec has no usable constraint.
+  LanguageVersion? _languageVersionFor(String dir) {
+    if (_dirVersions.containsKey(dir)) return _dirVersions[dir];
+    final chain = <String>[];
+    LanguageVersion? version;
+    for (var d = dir; ; d = p.dirname(d)) {
+      if (_dirVersions.containsKey(d)) {
+        version = _dirVersions[d];
+        break;
+      }
+      chain.add(d);
+      final pubspec = p.join(d, 'pubspec.yaml');
+      if (File(pubspec).existsSync()) {
+        version = _pubspecVersions.putIfAbsent(
+          pubspec,
+          () => _sdkLowerBound(pubspec),
+        );
+        break;
+      }
+      if (p.dirname(d) == d) break;
+    }
+    for (final d in chain) {
+      _dirVersions[d] = version;
+    }
+    return version;
+  }
+
+  /// Reads `environment: sdk:` from a pubspec. Anything unreadable or
+  /// malformed yields null: a broken pubspec is `dart pub`'s problem to
+  /// report, and parsing at the latest version is still a useful answer.
+  static LanguageVersion? _sdkLowerBound(String pubspec) {
+    try {
+      final doc = loadYaml(File(pubspec).readAsStringSync());
+      if (doc is! YamlMap) return null;
+      final env = doc['environment'];
+      if (env is! YamlMap) return null;
+      final sdk = env['sdk'];
+      return sdk is String ? LanguageVersion.fromSdkConstraint(sdk) : null;
+    } on FileSystemException {
+      return null;
+    } on YamlException {
+      return null;
+    }
   }
 
   LoadedConfig? _parseFile(String abs) => _parsedFiles.putIfAbsent(

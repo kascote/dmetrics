@@ -1,3 +1,4 @@
+import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/diagnostic/diagnostic.dart' as an;
@@ -25,12 +26,24 @@ class ParsedSource {
   bool get partial => diagnostics.any((d) => d.severity == Severity.error);
 }
 
-/// Parses with error recovery and the latest language version; `// @dart=`
-/// override comments are honored by the parser (§7.2).
+/// Parses with error recovery at the file's language version.
+///
+/// The version matters: the latest one rejects syntax older packages still
+/// use (Dart 3.13 made `final` on a parameter a parse error), so a file is
+/// parsed the way `dart` would parse it, with its package's version. A
+/// `// @dart=` comment can still lower the version for one file; the scanner
+/// applies it on top of the feature set given here.
 ParsedSource parseSource(SourceFile source) {
+  final version = source.languageVersion;
   final result = parseString(
     content: source.content,
     path: source.path,
+    featureSet: version == null
+        ? null
+        : FeatureSet.fromEnableFlags2(
+            sdkLanguageVersion: version.asVersion,
+            flags: const [],
+          ),
     throwIfDiagnostics: false,
   );
   final file = ss.SourceFile.fromString(source.content, url: source.path);
