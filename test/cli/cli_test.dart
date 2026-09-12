@@ -60,6 +60,7 @@ void main() {
       expect(top.out, contains('$toolName stats'));
       expect(top.out, contains('$toolName deps'));
       expect(top.out, contains('$toolName agent'));
+      expect(top.out, contains('$toolName init'));
       expect(
         run(['analyze', '-h']).out,
         startsWith('Usage: $toolName analyze'),

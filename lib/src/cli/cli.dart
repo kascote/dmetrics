@@ -1,13 +1,16 @@
 /// `dmetrics analyze [<file>|<dir> ...] [--json] [--config <path>]
 /// [--fail-on warn|fail] [--set <key>=<value>] [--threshold <spec>]` (§7.1),
 /// and `dmetrics stats` / `dmetrics deps` with the same targets and config
-/// handling. `dmetrics agent` takes no targets: it prints the guide an LLM
-/// agent reads before interpreting a report.
+/// handling. `dmetrics agent` and `dmetrics init` take no targets: the first
+/// prints the guide an LLM agent reads before interpreting a report, the
+/// second installs a pointer to it in the project's instructions file.
 ///
 /// Exit codes (§7.2): 0 clean, 1 violations, 2 analysis incomplete, 3 usage.
 /// `stats` and `deps` never exit 1: violations are their subject, not their
 /// outcome. In `--json` mode nothing but the document goes to stdout.
 library;
+
+import 'dart:io';
 
 import 'package:args/args.dart';
 
@@ -25,7 +28,7 @@ import '../report/deps.dart';
 import '../report/json_reporter.dart';
 import '../report/stats.dart';
 import '../version.dart';
-import 'agent_guide.dart';
+import 'agent.dart';
 
 const exitUsage = 3;
 
@@ -133,6 +136,17 @@ String usage([String? command]) => switch (command) {
         'Prints the guide for an LLM agent working in a project that uses\n'
         '$toolName: when to run it, how to read a report line, what each\n'
         'metric measures and what to do about a warning. No options.',
+  'init' =>
+    'Usage: $toolName init [options]\n\n'
+        'Writes a short block into the project\'s instructions file (CLAUDE.md\n'
+        'or AGENTS.md) that tells an LLM agent to run $toolName once per task\n'
+        'and to read the guide (`$toolName agent`) before interpreting a\n'
+        'report. The block sits between `$blockStart` and `$blockEnd`\n'
+        'markers, so a re-run replaces it and leaves the rest of the file\n'
+        'alone. `--skill` also writes the guide as a skill for Claude Code or\n'
+        'Codex; both read the same SKILL.md format from their own directory.\n\n'
+        '${buildInitParser().usage}\n\n'
+        'Exit codes: 0 written, 2 a file could not be written, 3 usage error.',
   'deps' =>
     'Usage: $toolName deps [<file>|<dir> ...] [options]\n\n'
         'Measures the same way analyze does, then prints the dependency graph\n'
@@ -145,13 +159,15 @@ String usage([String? command]) => switch (command) {
     'Usage: $toolName analyze [<file>|<dir> ...] [options]\n'
         '       $toolName stats   [<file>|<dir> ...] [options]\n'
         '       $toolName deps    [<file>|<dir> ...] [options]\n'
-        '       $toolName agent\n\n'
+        '       $toolName agent\n'
+        '       $toolName init    [options]\n\n'
         'analyze  Measure code metrics and print one consolidated report.\n'
         'stats    Distribution, threshold shares, sweep, contributor mix and\n'
         '         sibling clusters per metric, for calibrating thresholds.\n'
         'deps     The dependency graph of the run: cycles, hubs by fan-out\n'
         '         and fan-in, and the graph folded onto directories.\n'
-        'agent    The guide an LLM agent reads before interpreting a report.\n\n'
+        'agent    The guide an LLM agent reads before interpreting a report.\n'
+        'init     Point the project\'s CLAUDE.md (or AGENTS.md) at that guide.\n\n'
         'Run `$toolName <command> --help` for the command\'s options.\n\n'
         '$_exitCodes',
 };
@@ -168,7 +184,7 @@ int runCli(
   bool stdoutIsTerminal = false,
   Map<String, String> environment = const {},
 }) {
-  final early = _answerWithoutAnalysis(args, out, err);
+  final early = _answerWithoutAnalysis(args, out, err, runRoot);
   if (early != null) return early;
   final command = args.first;
   if (!const {'analyze', 'stats', 'deps'}.contains(command)) {
@@ -221,9 +237,15 @@ int runCli(
   };
 }
 
-/// The invocations that need no analysis: usage, `--version` and `agent`.
-/// Returns the exit code, or null when [args] name a command that runs.
-int? _answerWithoutAnalysis(List<String> args, StringSink out, StringSink err) {
+/// The invocations that need no analysis: usage, `--version`, `agent` and
+/// `init`. Returns the exit code, or null when [args] name a command that
+/// runs.
+int? _answerWithoutAnalysis(
+  List<String> args,
+  StringSink out,
+  StringSink err,
+  String runRoot,
+) {
   if (args.isEmpty) {
     err.writeln(usage());
     return exitUsage;
@@ -235,29 +257,54 @@ int? _answerWithoutAnalysis(List<String> args, StringSink out, StringSink err) {
     case '--version':
       out.writeln('$toolName $toolVersion');
       return 0;
-    case 'agent':
-      return _emitAgentGuide(args.sublist(1), out, err);
+    case 'agent' || 'init':
+      return _runTextCommand(args.first, args.sublist(1), out, err, runRoot);
     default:
       return null;
   }
 }
 
-/// `agent` has no options and no targets, so anything after it but `--help`
-/// is a usage error: a stray path would silently print the guide instead of
-/// telling the caller they meant `analyze`.
-int _emitAgentGuide(List<String> rest, StringSink out, StringSink err) {
-  if (rest.isEmpty) {
+/// `agent` and `init` take no targets, so a stray path is a usage error
+/// rather than silently printing the guide: the caller most likely meant
+/// `analyze`. Exit 2 when `init` cannot write, the same code as an analysis
+/// that could not complete.
+int _runTextCommand(
+  String command,
+  List<String> rest,
+  StringSink out,
+  StringSink err,
+  String runRoot,
+) {
+  try {
+    final parser = command == 'agent' ? buildAgentParser() : buildInitParser();
+    final parsed = parser.parse(rest);
+    if (parsed.flag('help')) {
+      out.writeln(usage(command));
+      return 0;
+    }
+    if (command == 'init') {
+      out.write(runInit(parsed, runRoot: runRoot));
+      return 0;
+    }
+    if (parsed.rest.isNotEmpty) {
+      throw UsageError(
+        '`agent` takes no arguments, got `${parsed.rest.join(' ')}`',
+      );
+    }
     out.write(agentGuide);
     return 0;
+  } on FormatException catch (e) {
+    err.writeln('${e.message}\n\n${usage(command)}');
+    return exitUsage;
+  } on UsageError catch (e) {
+    err.writeln('${e.message}\n\n${usage(command)}');
+    return exitUsage;
+  } on FileSystemException catch (e) {
+    err.writeln(
+      'could not write ${e.path}: ${e.osError?.message ?? e.message}',
+    );
+    return 2;
   }
-  if (rest.length == 1 && (rest.first == '--help' || rest.first == '-h')) {
-    out.writeln(usage('agent'));
-    return 0;
-  }
-  err.writeln(
-    '`agent` takes no arguments, got `${rest.join(' ')}`.\n\n${usage('agent')}',
-  );
-  return exitUsage;
 }
 
 ArgParser _parserFor(String command) => switch (command) {

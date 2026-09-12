@@ -184,13 +184,26 @@ dmetrics analyze [<file>|<dir> ...] [options]
 dmetrics stats   [<file>|<dir> ...] [options]
 dmetrics deps    [<file>|<dir> ...] [options]
 dmetrics agent
+dmetrics init    [--file <path>]... [--skill claude|codex]...
 ```
 
 `dmetrics agent` prints a guide for an LLM coding agent working in a project
 that uses dmetrics: when to run it, how to read a report line, what each
 metric measures and what to do about a warning. It ships inside the binary so
-it never drifts from the output it explains; point your CLAUDE.md or AGENTS.md
-at it.
+it never drifts from the output it explains.
+
+`dmetrics init` points a project at that guide: it writes a short block into
+the project's instructions file between `<!-- dmetrics:start -->` and
+`<!-- dmetrics:end -->` markers, so a re-run replaces the block and leaves the
+rest of the file alone. Without `--file` it uses the first of `CLAUDE.md` and
+`AGENTS.md` that exists, creating `CLAUDE.md` when neither does; `--file` names
+the file explicitly and repeats. The block tells the agent to run `dmetrics
+analyze` once per task and to read `dmetrics agent` before interpreting a
+report. `--skill claude` also writes the guide as a skill at
+`.claude/skills/dmetrics/SKILL.md`, and `--skill codex` at
+`.agents/skills/dmetrics/SKILL.md`, for projects that want it loaded without
+the extra command. Both agents read the same SKILL.md format, so the two files
+are identical; they are generated, and a re-run overwrites them.
 
 No targets means the current directory. Files and directories mix freely.
 Files named explicitly are analyzed even if `include`/`exclude` would skip
