@@ -90,6 +90,16 @@ void f(Object o) {
       );
     });
 
+    test('null-aware elements span the element, kind if', () {
+      expect(
+        contributorsOf('''
+Map<String, int> f(int? a, String? k, Map<String, int>? m) =>
+    {?k: 1, 'b': ?a, ...?m, 'c': [?a]};
+'''),
+        [('if', '?k: 1'), ('if', "'b': ?a"), ('if', '?a')],
+      );
+    });
+
     test('contributors are in source order', () {
       final r = resultOf('''
 int f(int a) => a > 0 ? (a > 1 && a > 2 ? 1 : 2) : 3;

@@ -323,13 +323,16 @@ what the console summary and JSON report show.
 | `c ? a : b`                                                                                                              | +1                                     | `ternary`    |
 | `&&`, `\|\|`                                                                                                             | +1 each                                | `&&`, `\|\|` |
 | `??`, `??=` (with `count_null_coalescing`)                                                                               | +1 each                                | `??`, `??=`  |
-| `?.`, `?..`, `?[]`, `!`, `...`, `...?`, `?x` elements                                                                    | 0                                      | —            |
+| Null-aware element `?x`, `?k: v`, `k: ?v`                                                                                | +1 each                                | `if`         |
+| `?.`, `?..`, `?[]`, `!`, `...`, `...?`                                                                                   | 0                                      | —            |
 | `assert`, `return`, `break`, `continue`, `throw`, `yield`, `await`, labels, cascades, `try`, `finally`, `rethrow`        | 0                                      | —            |
 | Closure / local function                                                                                                 | own scope                              | —            |
 
-The guiding rule for the null-aware family: count a construct when the author
-wrote both paths. `??` has a right operand, `?.` short-circuits to nothing.
-Irrefutability is decided syntactically, never from static types.
+The guiding rule: count a construct that chooses between authored outcomes.
+`??` chooses a right operand; `?x` chooses whether an element is present, like
+the `if (x != null) x` it replaces. `?.` passes null through an expression
+written once and counts 0. Irrefutability is decided syntactically, never
+from static types.
 
 Not measured: abstract, external and redirecting-factory declarations (no
 body, no scope). Branch constructs directly inside field or top-level

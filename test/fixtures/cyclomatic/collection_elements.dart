@@ -10,8 +10,9 @@ List<int> ifCaseElement(Object o) => [if (o case int x when x > 0) x];
 // expect: cyclomatic=2
 List<int> forElement(List<int> xs) => [for (final x in xs) x * 2];
 
-// Null-aware elements `?x`, `?k: v`, `k: ?v` (Dart 3.8+) and spreads: 0.
-// expect: cyclomatic=1
+// Null-aware elements `?x`, `?k: v`, `k: ?v` (Dart 3.8+): +1 each (kind if),
+// like the `if (x != null) x` they replace. Spreads, null-aware or not: 0.
+// expect: cyclomatic=3
 Map<String, int> nullAwareMap(int? a, String? k, Map<String, int>? m) => {
   ?k: 1,
   'b': ?a,
@@ -19,7 +20,7 @@ Map<String, int> nullAwareMap(int? a, String? k, Map<String, int>? m) => {
   ...{'c': 3},
 };
 
-// expect: cyclomatic=1
+// expect: cyclomatic=2
 List<int> nullAwareList(int? a, List<int>? xs) => [
   ?a,
   ...?xs,

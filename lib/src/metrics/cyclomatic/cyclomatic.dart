@@ -152,6 +152,16 @@ class CyclomaticMetric extends Metric {
           node.awaitKeyword ?? node.forKeyword,
           node.rightParenthesis,
         );
+      // A null-aware element inserts or omits one element, which is what
+      // `if (x != null) x` does and counts as an `if`; the lint that
+      // rewrites one into the other must not move the score. `?.` stays 0:
+      // it passes null through an expression written once, and counting it
+      // buys boilerplate hits (`lerp`, `copyWith`), not tangles.
+      case NullAwareElement():
+        return c('if', node.question, node.value);
+      case MapLiteralEntry(:final keyQuestion, :final valueQuestion)
+          when keyQuestion != null || valueQuestion != null:
+        return c('if', keyQuestion ?? node.key, node.value);
       case ForElement():
         return c(
           'loop',
