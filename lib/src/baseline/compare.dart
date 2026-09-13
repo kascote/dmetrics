@@ -10,6 +10,12 @@
 /// after it. No similarity heuristic: an edited closure whose ordinal also
 /// moved reads as new, and so does a renamed scope whose body changed.
 ///
+/// The baseline side is every entry under the run's targets, whether or
+/// not its file still exists: an entry whose file was deleted or renamed
+/// takes the fingerprint pass like any other, so a moved file is followed,
+/// and what stays unmatched counts as gone. Entries outside the targets
+/// are ignored, so a single-file run does not report the rest as gone.
+///
 /// A pure function of the run and the loaded files; the engine is not
 /// involved beyond the id helpers that strip and restore a path.
 library;
@@ -147,12 +153,14 @@ class ComparisonOutcome {
 }
 
 /// Compares [report] against [baselines], keyed by config root. [run] is
-/// the knob block the run counted under, as `runKnobs` renders it.
+/// the knob block the run counted under, as `runKnobs` renders it; [inRun]
+/// says whether a run-root-relative path lies under the run's targets.
 ComparisonOutcome compareBaselines({
   required Report report,
   required Map<String, LoadedBaseline?> baselines,
   required Map<String, Object?> run,
   required RunConfig config,
+  required bool Function(String runRelativePath) inRun,
 }) {
   final problems = <BaselineProblem>[];
   final byRoot = <String, String?>{};
@@ -183,17 +191,49 @@ ComparisonOutcome compareBaselines({
 
   final matches = <ScopeId, Map<String, BaselineMatch>>{};
   var counts = const BaselineCounts();
+  final present = {for (final f in report.files) f.path};
   for (final e in usable.entries) {
     final files = [
       for (final f in report.files)
         if (f.source.configRoot == e.key) f,
     ];
-    counts = _Root(e.value, files, config.violationFloor).run(matches, counts);
+    final absent = _absentFiles(e.value, e.key, usable.keys, present, inRun);
+    final root = _Root(e.value, files, absent, config.violationFloor);
+    counts = root.run(matches, counts);
   }
   return ComparisonOutcome(
     BaselineComparison(byRoot: byRoot, matches: matches, counts: counts),
     problems,
   );
+}
+
+/// The stored files of [baseline] that are not in the tree any more and
+/// that [root] answers for: under the targets, and nearer to [root] than to
+/// any other of [roots], so a file shared by several roots (`--baseline`)
+/// counts each absent file once.
+List<String> _absentFiles(
+  LoadedBaseline baseline,
+  String root,
+  Iterable<String> roots,
+  Set<String> present,
+  bool Function(String) inRun,
+) => [
+  for (final stored in baseline.file.files.keys)
+    if (baseline.location.toRunRoot(stored) case final path
+        when !present.contains(path) &&
+            inRun(path) &&
+            _nearestRoot(path, roots) == root)
+      path,
+];
+
+/// The deepest of [roots] that contains [path]; `.` contains everything.
+String? _nearestRoot(String path, Iterable<String> roots) {
+  String? best;
+  for (final r in roots) {
+    final under = r == '.' || path == r || path.startsWith('$r/');
+    if (under && (best == null || r.length > best.length)) best = r;
+  }
+  return best;
 }
 
 String _describeRun(Map<String, Object?> run) {
@@ -216,18 +256,18 @@ class _Root {
   final List<FileReport> files;
   final Verdict floor;
 
-  /// Entries of the run's files, keyed by their id under the run root.
+  /// Entries of the run's files, present or [absent], keyed by their id
+  /// under the run root.
   final entries = <ScopeId, BaselineEntry>{};
   final matched = <ScopeId, ScopeId>{};
   final taken = <ScopeId>{};
 
-  _Root(this.baseline, this.files, this.floor) {
-    for (final f in files) {
-      final stored = baseline.location.fromRunRoot(f.path);
-      final scopes = baseline.file.files[stored];
+  _Root(this.baseline, this.files, List<String> absent, this.floor) {
+    for (final path in [for (final f in files) f.path, ...absent]) {
+      final scopes = baseline.file.files[baseline.location.fromRunRoot(path)];
       if (scopes == null) continue;
       for (final s in scopes.entries) {
-        entries[ScopeId.inFile(f.path, s.key)] = s.value;
+        entries[ScopeId.inFile(path, s.key)] = s.value;
       }
     }
   }

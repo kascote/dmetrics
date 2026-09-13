@@ -54,11 +54,13 @@ void main() {
     Report report,
     LoadedBaseline baseline, {
     AnalysisConfig? cfg,
+    bool Function(String)? inRun,
   }) => compareBaselines(
     report: report,
     baselines: {'.': baseline},
     run: knobs(cfg),
     config: (cfg ?? config).run,
+    inRun: inRun ?? (_) => true,
   );
 
   BaselineMatch? matchOf(
@@ -434,12 +436,30 @@ void main() {
       );
     });
 
-    test('files outside the run are ignored on both sides', () {
+    test('entries outside the targets are ignored on both sides', () {
       final before = run({'lib/a.dart': fn('a', 6), 'lib/b.dart': fn('b', 6)});
       final after = run({'lib/a.dart': fn('a', 6)});
-      final c = compare(after, snapshot(before)).comparison!;
+      final c = compare(
+        after,
+        snapshot(before),
+        inRun: (path) => path == 'lib/a.dart',
+      ).comparison!;
       expect(c.counts.gone, 0);
       expect(c.counts.baselined, 1);
+    });
+
+    test('an entry whose file is gone follows a file move, else is gone', () {
+      // dart_style moved lib/src/*.dart under lib/src/short/: the old
+      // files are not in the tree, but their entries still describe code.
+      final before = run({'lib/a.dart': '${fn('a', 6)}${fn('b', 4)}'});
+      final after = run({'lib/short/a.dart': fn('a', 6)});
+      final c = compare(after, snapshot(before)).comparison!;
+      expect(
+        matchOf(c, after, 'lib/short/a.dart', 'function:a')!.status,
+        BaselineStatus.baselined,
+      );
+      expect(c.counts.added, 0);
+      expect(c.counts.gone, 1);
     });
   });
 }

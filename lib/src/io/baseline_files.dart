@@ -146,7 +146,7 @@ List<WrittenBaseline> writeBaselines(
   final run = runKnobs(result.metrics, result.config.run);
   final metrics = [for (final m in result.metrics) m.id];
   final recorded = recordRun(report);
-  final covered = _Targets(runRoot, targets);
+  final covered = RunTargets(runRoot, targets);
   final written = <WrittenBaseline>[];
   for (final root in result.config.roots.keys.toList()..sort()) {
     final path = outputPath == null
@@ -210,10 +210,13 @@ int _violations(List<FileReport> files) {
 
 /// The run's targets as run-root-relative paths: a file covers itself, a
 /// directory everything under it.
-class _Targets {
+/// The run's targets as run-root-relative prefixes: which files a run
+/// covers, whether or not they exist. The writer refreshes exactly these
+/// entries; the comparison counts exactly these entries as in the run.
+class RunTargets {
   final List<String> paths;
 
-  _Targets(String runRoot, List<String> targets)
+  RunTargets(String runRoot, List<String> targets)
     : paths = [
         for (final t in targets.isEmpty ? const ['.'] : targets)
           _relative(runRoot, t),

@@ -83,6 +83,7 @@ RunResult analyzePaths(
     baselines: baselines.byRoot,
     run: runKnobs(metrics, resolved.config.run),
     config: resolved.config.run,
+    inRun: RunTargets(runRoot, targets).contains,
   );
   return RunResult(
     metrics: metrics,

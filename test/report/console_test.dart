@@ -109,6 +109,7 @@ String name(int x) => switch (x) {
       baselines: {'.': baseline},
       run: runKnobs(metrics, config.run),
       config: config.run,
+      inRun: (_) => true,
     );
     final withBaseline = RunResult(
       metrics: metrics,
@@ -191,6 +192,7 @@ String name(int x) => switch (x) {
         baselines: {'.': quietBaseline},
         run: runKnobs(metrics, loose.run),
         config: loose.run,
+        inRun: (_) => true,
       ).comparison,
     );
     expect(drifted.exitCode, 0);
