@@ -461,5 +461,82 @@ void main() {
       expect(c.counts.added, 0);
       expect(c.counts.gone, 1);
     });
+
+    test(
+      'a scope whose file moved and whose body changed matches by local id',
+      () {
+        // Neither the id (the path changed) nor the fingerprint (the body
+        // changed) is in the run; the path-stripped id is, once each side.
+        final before = run({'lib/a.dart': '${fn('a', 6)}${fn('b', 5)}'});
+        final after = run({'lib/short/a.dart': '${fn('a', 7)}${fn('b', 2)}'});
+        final c = compare(after, snapshot(before)).comparison!;
+        final a = matchOf(c, after, 'lib/short/a.dart', 'function:a')!;
+        expect(a.status, BaselineStatus.worse);
+        expect(a.value, 6);
+        expect(
+          matchOf(c, after, 'lib/short/a.dart', 'function:b')!.status,
+          BaselineStatus.changed,
+        );
+        expect(c.counts.added, 0);
+        expect(c.counts.gone, 0);
+        expect(c.counts.fixed, 1);
+      },
+    );
+
+    test('the local id pass only reaches entries of absent files', () {
+      // lib/a.dart is still in the tree: its `a` was renamed and edited,
+      // and the new `a` in lib/b.dart is not its move.
+      final before = run({'lib/a.dart': fn('a', 6)});
+      final after = run({'lib/a.dart': fn('z', 7), 'lib/b.dart': fn('a', 7)});
+      final c = compare(after, snapshot(before)).comparison!;
+      expect(
+        matchOf(c, after, 'lib/b.dart', 'function:a')!.status,
+        BaselineStatus.added,
+      );
+      expect(c.counts.added, 2);
+      expect(c.counts.gone, 1);
+    });
+
+    test('an ambiguous local id matches nothing', () {
+      final before = run({
+        'lib/a.dart': fn('a', 6),
+        'lib/b.dart': 'class C { ${fn('a', 6)} }',
+      });
+      // Both files left; two unmatched `a`s on the stored side, one on
+      // the run side under a class, so `method:C.a` is unique and matches
+      // while `function:a` does not.
+      final after = run({
+        'lib/x.dart': fn('a', 7),
+        'lib/y.dart': fn('a', 7),
+        'lib/z.dart': 'class C { ${fn('a', 7)} }',
+      });
+      final c = compare(after, snapshot(before)).comparison!;
+      expect(
+        matchOf(c, after, 'lib/x.dart', 'function:a')!.status,
+        BaselineStatus.added,
+      );
+      expect(
+        matchOf(c, after, 'lib/z.dart', 'method:C.a')!.status,
+        BaselineStatus.worse,
+      );
+      expect(c.counts.gone, 1);
+    });
+
+    test('a closure follows its moved-and-edited parent by local id', () {
+      final before = run({
+        'lib/a.dart':
+            'void a() { var f = (int x) => x > 0 ? x > 1 ? 1 : 2 : 3; }',
+      });
+      final after = run({
+        'lib/short/a.dart':
+            'void a() { var f = (int x) => x > 0 ? x > 1 ? 1 : 2 : 4; int y; }',
+      });
+      final c = compare(after, snapshot(before)).comparison!;
+      expect(
+        matchOf(c, after, 'lib/short/a.dart', 'function:a::closure#1')!.status,
+        BaselineStatus.unchanged,
+      );
+      expect(c.counts.gone, 0);
+    });
   });
 }

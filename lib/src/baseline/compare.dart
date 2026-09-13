@@ -1,20 +1,25 @@
 /// The comparison of a finished run against its config roots' baselines:
 /// which scope is which, and what each result's status is.
 ///
-/// Matching is three passes, deterministic and explainable: named scopes by
+/// Matching is four passes, deterministic and explainable: named scopes by
 /// exact id, which survives every body edit; then, among what is still
 /// unmatched on both sides, by fingerprint when it is unique on both sides,
 /// which follows a move between files and a rename; then closures by exact
-/// id, the ordinal under their parent. Closures take the fingerprint pass
-/// before the ordinal pass because inserting a closure shifts the ordinals
-/// after it. No similarity heuristic: an edited closure whose ordinal also
-/// moved reads as new, and so does a renamed scope whose body changed.
+/// id, the ordinal under their parent; then, against the entries of files
+/// that are no longer in the tree, by the id with its path stripped when
+/// that is unique on both sides, which follows a scope whose file moved
+/// and whose body was edited in the same change. Closures take the
+/// fingerprint pass before the ordinal pass because inserting a closure
+/// shifts the ordinals after it. No similarity heuristic: an edited closure
+/// whose ordinal also moved reads as new, and so does a renamed scope whose
+/// body changed.
 ///
 /// The baseline side is every entry under the run's targets, whether or
 /// not its file still exists: an entry whose file was deleted or renamed
 /// takes the fingerprint pass like any other, so a moved file is followed,
-/// and what stays unmatched counts as gone. Entries outside the targets
-/// are ignored, so a single-file run does not report the rest as gone.
+/// then the local-id pass, and what stays unmatched counts as gone. Entries
+/// outside the targets are ignored, so a single-file run does not report
+/// the rest as gone.
 ///
 /// A pure function of the run and the loaded files; the engine is not
 /// involved beyond the id helpers that strip and restore a path.
@@ -256,19 +261,32 @@ class _Root {
   final List<FileReport> files;
   final Verdict floor;
 
-  /// Entries of the run's files, present or [absent], keyed by their id
+  /// Entries of the run's files, present or absent, keyed by their id
   /// under the run root.
   final entries = <ScopeId, BaselineEntry>{};
+
+  /// The entries of files no longer in the tree, to their path-stripped
+  /// id: the only side a local id can match across files.
+  final absent = <ScopeId, String>{};
   final matched = <ScopeId, ScopeId>{};
   final taken = <ScopeId>{};
 
-  _Root(this.baseline, this.files, List<String> absent, this.floor) {
-    for (final path in [for (final f in files) f.path, ...absent]) {
-      final scopes = baseline.file.files[baseline.location.fromRunRoot(path)];
-      if (scopes == null) continue;
-      for (final s in scopes.entries) {
-        entries[ScopeId.inFile(path, s.key)] = s.value;
-      }
+  _Root(this.baseline, this.files, List<String> absentFiles, this.floor) {
+    for (final f in files) {
+      _load(f.path, isAbsent: false);
+    }
+    for (final path in absentFiles) {
+      _load(path, isAbsent: true);
+    }
+  }
+
+  void _load(String path, {required bool isAbsent}) {
+    final scopes = baseline.file.files[baseline.location.fromRunRoot(path)];
+    if (scopes == null) return;
+    for (final s in scopes.entries) {
+      final id = ScopeId.inFile(path, s.key);
+      entries[id] = s.value;
+      if (isAbsent) absent[id] = s.key;
     }
   }
 
@@ -283,6 +301,7 @@ class _Root {
     _byId(scopes, closures: false);
     _byFingerprint(scopes);
     _byId(scopes, closures: true);
+    _byLocalId();
     return _classify(scopes, matches, counts);
   }
 
@@ -295,22 +314,56 @@ class _Root {
   }
 
   void _byFingerprint(List<ScopeResult> scopes) {
-    final current = <String, List<ScopeResult>>{};
+    final current = <String, List<ScopeId>>{};
     for (final s in scopes) {
       if (matched.containsKey(s.id)) continue;
-      current.putIfAbsent(s.scope.fingerprint, () => []).add(s);
+      current.putIfAbsent(s.scope.fingerprint, () => []).add(s.id);
     }
     final stored = <String, List<ScopeId>>{};
     for (final e in entries.entries) {
       if (taken.contains(e.key)) continue;
       stored.putIfAbsent(e.value.fingerprint, () => []).add(e.key);
     }
+    _pairUnique(current, stored);
+  }
+
+  /// The moved-and-edited case the first three passes miss: a scope whose
+  /// file left the tree and whose body changed has neither its id nor its
+  /// fingerprint in the run. Its path-stripped id is the remaining key,
+  /// specific enough (kind, class, name, closure ordinal) when it names
+  /// exactly one unmatched scope in the run and exactly one entry of an
+  /// absent file. A `library` scope carries no name in its id, so it is
+  /// left out: every file has one.
+  void _byLocalId() {
+    final current = <String, List<ScopeId>>{};
+    for (final f in files) {
+      for (final s in f.scopes) {
+        if (matched.containsKey(s.id) || s.scope.kind == ScopeKind.library) {
+          continue;
+        }
+        current.putIfAbsent(s.id.localIn(f.path), () => []).add(s.id);
+      }
+    }
+    final stored = <String, List<ScopeId>>{};
+    for (final e in absent.entries) {
+      if (taken.contains(e.key)) continue;
+      stored.putIfAbsent(e.value, () => []).add(e.key);
+    }
+    _pairUnique(current, stored);
+  }
+
+  /// Matches every key that names exactly one scope on each side; a key
+  /// with two candidates on either side is ambiguous and matches nothing.
+  void _pairUnique(
+    Map<String, List<ScopeId>> current,
+    Map<String, List<ScopeId>> stored,
+  ) {
     for (final e in current.entries) {
       final candidates = stored[e.key];
       if (e.value.length != 1 || candidates == null || candidates.length != 1) {
         continue;
       }
-      matched[e.value.single.id] = candidates.single;
+      matched[e.value.single] = candidates.single;
       taken.add(candidates.single);
     }
   }

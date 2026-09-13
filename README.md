@@ -268,8 +268,10 @@ with added lines, paying it down shrinks the file.
 
 Scopes match by id first (which survives every body edit), then by
 fingerprint when it is unique on both sides (which follows a move between
-files and a rename), then closures by their ordinal. A rename plus a body
-edit reads as new. Each result then has a status:
+files and a rename), then closures by their ordinal, then, for files no
+longer in the tree, by the id without its path when it is unique on both
+sides (which follows a file move plus an edit). A rename plus a body edit
+reads as new. Each result then has a status:
 
 | Status      | Meaning                                                        | Exit 1 |
 | ----------- | -------------------------------------------------------------- | ------ |
