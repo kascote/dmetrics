@@ -56,8 +56,8 @@ run status (`ok`, `violations`, `errors`), which maps to the exit code.
 | Exit | Status       | Meaning                                                                                    |
 | ---- | ------------ | ------------------------------------------------------------------------------------------ |
 | 0    | `ok`         | Analysis complete, no verdict at or above `fail_on`.                                       |
-| 1    | `violations` | Analysis complete, at least one non-suppressed verdict at or above `fail_on`.              |
-| 2    | `errors`     | Analysis incomplete: parse errors, unreadable files, invalid config, conflicting settings. |
+| 1    | `violations` | Analysis complete, at least one non-suppressed verdict at or above `fail_on`; with a baseline, one that is new or worse. |
+| 2    | `errors`     | Analysis incomplete: parse errors, unreadable files, invalid config or baseline, conflicting settings. |
 | 3    | —            | Usage error: bad flags, nonexistent target or `--config` file.                             |
 
 Errors win over violations. Files with syntax errors are still measured from
@@ -78,6 +78,7 @@ dmetrics:
   closure_rollup: separate # run-global: separate | include_in_parent
   include: ["lib/**", "bin/**"] # per-root discovery globs; default: every .dart file
   exclude: ["**.g.dart"] # per-root; default: ['**.g.dart', '**.freezed.dart']
+  baseline: dmetrics_baseline.json # per-root; default: this name, used when present; `none` opts out
   metrics:
     cyclomatic:
       enabled: true
@@ -105,6 +106,7 @@ dmetrics:
 | `closure_rollup` | run-global | `separate`                         | How closures and local functions aggregate into their parent. See [Closure roll-up](#closure-roll-up). |
 | `include`        | per-root   | every `.dart` file                 | Globs selecting files when a directory is analyzed. Explicitly named files are always analyzed.        |
 | `exclude`        | per-root   | `['**.g.dart', '**.freezed.dart']` | Globs removed from discovery. Setting this replaces the default list.                                  |
+| `baseline`       | per-root   | `dmetrics_baseline.json`           | The baseline file, relative to the root. A configured file must exist; the default is used when it does. `none` opts out. See [Baseline](#baseline-dmetrics-baseline). |
 | `metrics`        | per-root   | all enabled, default thresholds    | Per-metric settings keyed by metric id. See below.                                                     |
 | `overrides`      | per-root   | none                               | Path-glob blocks that change `thresholds` and `enabled` for matching files. Last matching block wins.  |
 
@@ -178,11 +180,12 @@ roots.
 ## Command line
 
 ```
-dmetrics analyze [<file>|<dir> ...] [options]
-dmetrics stats   [<file>|<dir> ...] [options]
-dmetrics deps    [<file>|<dir> ...] [options]
+dmetrics analyze  [<file>|<dir> ...] [options]
+dmetrics baseline [<file>|<dir> ...] [options]
+dmetrics stats    [<file>|<dir> ...] [options]
+dmetrics deps     [<file>|<dir> ...] [options]
 dmetrics agent
-dmetrics init    [--file <path>]... [--skill claude|codex]...
+dmetrics init     [--file <path>]... [--skill claude|codex]...
 ```
 
 `dmetrics agent` prints a guide for an LLM coding agent working in a project
@@ -217,7 +220,10 @@ them, the same way `dart analyze` behaves.
 | `--fail-on warn\|fail`               | `analyze` only. Shorthand for `--set fail_on=...`.                                                            |
 | `--set <key>=<value>`                | Fix a run-global setting for the whole run. Repeatable. Keys: `fail_on`, `closure_rollup`, `<metric>.<knob>`. |
 | `--threshold <metric>=warn:N,fail:M` | Force a metric's thresholds in every root, above any `overrides`. Repeatable. Order of `warn`/`fail` is free. |
-| `--top N`                            | `deps` only, console mode. Rows per hub table and back edges listed per cycle. Default 10.                     |
+| `--baseline <path>`                  | `analyze` only. Compare against this file in every root instead of each root's own.                          |
+| `--no-baseline`                      | `analyze` only. Compare against nothing: every violation counts.                                              |
+| `--output <path>`                    | `baseline` only. Write here instead of the root's configured path. Single-root runs only.                   |
+| `--top N`                            | Console mode. `analyze`: rows in the changed-since-baseline section. `deps`: rows per hub table and back edges per cycle. Default 10. |
 | `--depth N`                          | `deps` only. Directory levels kept under `lib/src` (or `lib`) when folding the graph. Default 1.              |
 | `--help`, `-h`                       | Usage.                                                                                                        |
 | `--version`                          | Tool name and version.                                                                                        |
@@ -236,6 +242,57 @@ dart run bin/dmetrics.dart analyze lib \
   --set cyclomatic.count_case_arms=false \
   --set closure_rollup=include_in_parent
 ```
+
+### Baseline: `dmetrics baseline`
+
+Thresholds catch the tail; deltas catch the drift. A baseline is a snapshot
+of one run that `analyze` compares against, so CI can be strict on new code
+in a codebase that already fails, and so a function creeping from 4 to 9
+under a threshold of 10 is visible before it crosses.
+
+```sh
+dmetrics baseline lib bin      # record: writes dmetrics_baseline.json
+dmetrics analyze lib bin       # compare: exit 1 only on new or worse
+```
+
+`baseline` measures exactly like `analyze` and records every scope's values
+in each config root's file (`baseline:` in `analysis_options.yaml`; default
+`dmetrics_baseline.json` next to it). Values only: no verdicts, no
+thresholds. The comparison applies the current thresholds to both sides, so
+tightening a threshold grows the accepted debt instead of failing CI on
+legacy code. Entries for files under the targets are replaced and the rest
+kept, so `dmetrics baseline lib/src/parser.dart` refreshes one file. It
+refuses to write when analysis is incomplete. One scope per line, sorted,
+so the file's git diff is the debt ledger's history: adding debt is a commit
+with added lines, paying it down shrinks the file.
+
+Scopes match by id first (which survives every body edit), then by
+fingerprint when it is unique on both sides (which follows a move between
+files and a rename), then closures by their ordinal. A rename plus a body
+edit reads as new. Each result then has a status:
+
+| Status      | Meaning                                                        | Exit 1 |
+| ----------- | -------------------------------------------------------------- | ------ |
+| `new`       | No match. A violation when at or above `fail_on`.              | yes    |
+| `worse`     | At or above `fail_on` and above the baseline value.            | yes    |
+| `baselined` | At or above `fail_on`, at or below the baseline value: debt.   | no     |
+| `changed`   | Below `fail_on`, value differs: drift, either direction.       | no     |
+| `unchanged` | Below `fail_on`, same value.                                   | no     |
+
+The console shows the status in the tag (`fail (new)`, `fail (worse, was
+11)`, `fail (baselined)` dimmed, `warn (was 6)`), lists the drift that did
+not print as a finding under `Changed since baseline` (largest delta first,
+`--top` rows), and adds a `baseline:` clause to the summary with the
+nonzero counts, `fixed` and `gone` included, plus a nudge to refresh when
+there are any. The JSON report adds `baseline: { status, value }` to each
+compared result, `baseline` (the file path) to each config, and the counts
+to `summary`. A baseline recorded under different counting knobs is exit 2:
+the values are not comparable; run `dmetrics baseline` again.
+
+For CI: run `dmetrics analyze --json` as the artifact, gate on the exit
+code, put the console output in the job summary. Refreshing the baseline is
+a deliberate commit, reviewed like any other; a stale file never breaks
+matching for named scopes.
 
 ### Calibrating thresholds: `dmetrics stats`
 
@@ -524,7 +581,8 @@ and `files[]`. Each file carries its `configRoot`, its own `status` and parse
 `diagnostics`, and `scopes[]` with the scope's id, kind, qualified name, span,
 measured value, rolled-up value, applied threshold, verdict, suppression, and
 every contributor with its span. A `library` scope's coupling result also
-carries `detail` (the import graph, see above). Ordering is deterministic:
+carries `detail` (the import graph, see above), and with a baseline every
+compared result carries `baseline` (see above). Ordering is deterministic:
 configs by root, files by path, scopes by start offset, contributors by start
 offset.
 

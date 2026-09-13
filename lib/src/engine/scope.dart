@@ -52,6 +52,21 @@ class ScopeId {
 
   const ScopeId(this.value);
 
+  /// Rebuilds an id from [localIn]'s output under [path]. The baseline
+  /// stores ids without their path so a file can move with the baseline;
+  /// only these two helpers know how a path sits inside an id.
+  ScopeId.inFile(String path, String local) : value = '$path::$local';
+
+  /// The id with its file path stripped: `method:C.m`, `library`,
+  /// `method:C.m::closure#1`. [path] must be the file's own path.
+  String localIn(String path) {
+    final prefix = '$path::';
+    if (!value.startsWith(prefix)) {
+      throw ArgumentError('$value is not a scope of $path');
+    }
+    return value.substring(prefix.length);
+  }
+
   @override
   bool operator ==(Object other) => other is ScopeId && other.value == value;
 

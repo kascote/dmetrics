@@ -2,10 +2,13 @@
 /// I/O layer found out around it, with the §7.2 status and exit code.
 library;
 
+import '../baseline/compare.dart';
 import '../config/config.dart';
 import '../config/threshold.dart';
 import '../engine/metric.dart';
 import '../engine/report.dart';
+import '../engine/result.dart';
+import '../engine/scope.dart';
 
 enum RunStatus {
   ok(0),
@@ -71,11 +74,16 @@ class RunResult {
   final Report? report;
   final List<RunDiagnostic> diagnostics;
 
+  /// The comparison against the roots' baselines, or null when no root had
+  /// one: every violation then counts.
+  final BaselineComparison? baseline;
+
   const RunResult({
     required this.metrics,
     required this.config,
     required this.report,
     this.diagnostics = const [],
+    this.baseline,
   });
 
   List<FileReport> get files => report?.files ?? const [];
@@ -91,22 +99,30 @@ class RunResult {
 
   int get exitCode => status.exitCode;
 
-  /// Any non-suppressed verdict at or above `fail_on`.
+  /// Any non-suppressed verdict at or above `fail_on` that the baseline
+  /// does not accept: with a baseline, new or worse.
   bool get hasViolations {
-    final floor = config.run.failOn == FailOn.warn
-        ? Verdict.warn
-        : Verdict.fail;
+    final floor = config.run.violationFloor;
     for (final f in files) {
       for (final s in f.scopes) {
-        for (final r in s.results.values) {
-          if (r.suppressed == null && r.verdict.index >= floor.index) {
-            return true;
-          }
+        for (final r in s.results.entries) {
+          if (isViolation(s.id, r.key, r.value, floor)) return true;
         }
       }
     }
     return false;
   }
+
+  /// The one rule behind exit 1, per result.
+  bool isViolation(
+    ScopeId id,
+    String metricId,
+    MetricResult r,
+    Verdict floor,
+  ) =>
+      r.suppressed == null &&
+      r.verdict.index >= floor.index &&
+      !(baseline?.accepts(id, metricId) ?? false);
 
   RunSummary get summary {
     final verdicts = {for (final v in Verdict.values) v: 0};

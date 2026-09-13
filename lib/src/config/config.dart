@@ -48,6 +48,10 @@ enum FailOn {
 
 /// Run-global settings: identical across every config root in a run.
 class RunConfig {
+  /// The lowest verdict that counts as a violation (`fail_on`).
+  Verdict get violationFloor =>
+      failOn == FailOn.warn ? Verdict.warn : Verdict.fail;
+
   static const keyClosureRollup = 'closure_rollup';
   static const keyFailOn = 'fail_on';
 
@@ -116,6 +120,9 @@ class ConfigOverride {
 class RootConfig {
   static const defaultExclude = ['**.g.dart', '**.freezed.dart'];
 
+  /// The baseline file a root uses when `baseline:` names none.
+  static const defaultBaseline = 'dmetrics_baseline.json';
+
   /// Run-root-relative path of the config file, or null for built-in
   /// defaults.
   final String? source;
@@ -134,6 +141,14 @@ class RootConfig {
   /// Discovery globs relative to the root.
   final List<String> exclude;
 
+  /// `baseline:` as written, relative to the root; null means
+  /// [defaultBaseline]. A configured file must exist; the default is used
+  /// only when it does.
+  final String? baseline;
+
+  /// `baseline: none`: compare against nothing in this root.
+  final bool baselineEnabled;
+
   const RootConfig({
     this.source,
     this.metrics = const {},
@@ -141,7 +156,16 @@ class RootConfig {
     this.forced = const {},
     this.include,
     this.exclude = defaultExclude,
+    this.baseline,
+    this.baselineEnabled = true,
   });
+
+  /// The baseline file relative to the root, or null when opted out.
+  String? get baselinePath =>
+      baselineEnabled ? baseline ?? defaultBaseline : null;
+
+  /// Whether a missing baseline file is a problem: only when configured.
+  bool get baselineRequired => baselineEnabled && baseline != null;
 
   static const RootConfig defaults = RootConfig();
 
@@ -174,6 +198,8 @@ class RootConfig {
     Map<String, MetricConfig>? forced,
     List<String>? include,
     List<String>? exclude,
+    String? baseline,
+    bool? baselineEnabled,
   }) => RootConfig(
     source: source ?? this.source,
     metrics: metrics ?? this.metrics,
@@ -181,6 +207,8 @@ class RootConfig {
     forced: forced ?? this.forced,
     include: include ?? this.include,
     exclude: exclude ?? this.exclude,
+    baseline: baseline ?? this.baseline,
+    baselineEnabled: baselineEnabled ?? this.baselineEnabled,
   );
 }
 

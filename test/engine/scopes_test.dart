@@ -163,6 +163,22 @@ class C {
       );
     });
 
+    test('fingerprint ignores the declared name, follows the body', () {
+      String fp(String source) => scopesOf(source).single.fingerprint;
+      expect(fp('int a(int x) => x + 1;'), fp('int renamed(int x) => x + 1;'));
+      expect(fp('int a(int x) => x + 1;'), isNot(fp('int a(int x) => x + 2;')));
+      expect(
+        fp('class C { C.foo(int x) : assert(x > 0); }'),
+        fp('class D { D.bar(int x) : assert(x > 0); }'),
+      );
+      expect(
+        fp('class C { void m() { m(); } }'),
+        isNot(fp('class C { void n() { n(); } }')),
+        reason: 'the name is masked only where it is declared',
+      );
+      expect(fp('int a(int x) => x + 1;'), matches(r'^[0-9a-f]{8}$'));
+    });
+
     test('two packages with identical relative paths get distinct ids', () {
       const content = 'class C { void m() {} }';
       final report = analyze(

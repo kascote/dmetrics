@@ -1,23 +1,28 @@
 /// `dmetrics analyze [<file>|<dir> ...] [--json] [--config <path>]
-/// [--fail-on warn|fail] [--set <key>=<value>] [--threshold <spec>]` (§7.1),
-/// and `dmetrics stats` / `dmetrics deps` with the same targets and config
-/// handling. `dmetrics agent` and `dmetrics init` take no targets: the first
-/// prints the guide an LLM agent reads before interpreting a report, the
-/// second installs a pointer to it in the project's instructions file.
+/// [--fail-on warn|fail] [--set <key>=<value>] [--threshold <spec>]
+/// [--baseline <path>] [--no-baseline] [--top N]` (§7.1), and
+/// `dmetrics stats` / `dmetrics deps` / `dmetrics baseline` with the same
+/// targets and config handling. `dmetrics agent` and `dmetrics init` take no
+/// targets: the first prints the guide an LLM agent reads before
+/// interpreting a report, the second installs a pointer to it in the
+/// project's instructions file.
 ///
 /// Exit codes (§7.2): 0 clean, 1 violations, 2 analysis incomplete, 3 usage.
-/// `stats` and `deps` never exit 1: violations are their subject, not their
-/// outcome. In `--json` mode nothing but the document goes to stdout.
+/// `stats`, `deps` and `baseline` never exit 1: violations are their
+/// subject, not their outcome. In `--json` mode nothing but the document
+/// goes to stdout.
 library;
 
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:path/path.dart' as p;
 
 import '../config/loader.dart';
 import '../config/threshold.dart';
 import '../engine/metric.dart';
 import '../io/analyze_paths.dart';
+import '../io/baseline_files.dart';
 import '../report/ansi.dart';
 import '../report/run_result.dart';
 import '../metrics/cognitive/cognitive.dart';
@@ -90,7 +95,48 @@ ArgParser buildAnalyzeParser() =>
         negatable: false,
         help:
             'Console output: print every scope, not only warn/fail/suppressed.',
+      )
+      ..addOption(
+        'baseline',
+        valueHelp: 'path',
+        help:
+            'Compare against this baseline file in every config root, '
+            'instead of each root\'s own.',
+      )
+      ..addFlag(
+        'no-baseline',
+        negatable: false,
+        help: 'Compare against no baseline: every violation counts.',
+      )
+      ..addOption(
+        'top',
+        defaultsTo: '10',
+        valueHelp: 'N',
+        help: 'Console output: rows in the changed-since-baseline section.',
       );
+
+/// `baseline` measures like `analyze` and writes instead of judging, so it
+/// takes no output or verdict options.
+ArgParser buildBaselineParser() => ArgParser()
+  ..addOption(
+    'config',
+    valueHelp: 'path',
+    help: 'Use one analysis_options.yaml as the config root for every file.',
+  )
+  ..addMultiOption(
+    'set',
+    splitCommas: false,
+    valueHelp: 'key=value',
+    help: 'Fix a run-global setting for the whole run, as analyze does.',
+  )
+  ..addOption(
+    'output',
+    valueHelp: 'path',
+    help:
+        'Write here instead of the config root\'s baseline path. '
+        'Single-root runs only.',
+  )
+  ..addFlag('help', abbr: 'h', negatable: false, help: 'Show this help.');
 
 ArgParser buildStatsParser() =>
     _commonParser('Write the stats document to stdout.');
@@ -114,8 +160,9 @@ ArgParser buildDepsParser() =>
       );
 
 const _exitCodes =
-    'Exit codes: 0 clean, 1 violations (analyze only), 2 analysis incomplete\n'
-    '(parse errors, unreadable files, invalid config), 3 usage error.';
+    'Exit codes: 0 clean, 1 violations (analyze only: new or worse than the\n'
+    'baseline when there is one), 2 analysis incomplete (parse errors,\n'
+    'unreadable files, invalid config or baseline), 3 usage error.';
 
 /// Top-level usage, or one command\'s when [command] is given.
 String usage([String? command]) => switch (command) {
@@ -147,6 +194,18 @@ String usage([String? command]) => switch (command) {
         'Codex; both read the same SKILL.md format from their own directory.\n\n'
         '${buildInitParser().usage}\n\n'
         'Exit codes: 0 written, 2 a file could not be written, 3 usage error.',
+  'baseline' =>
+    'Usage: $toolName baseline [<file>|<dir> ...] [options]\n\n'
+        'Measures the same way analyze does, then records every scope\'s\n'
+        'values in each config root\'s baseline file (`baseline:` in\n'
+        'analysis_options.yaml, default dmetrics_baseline.json next to it).\n'
+        'Entries for files under the targets are replaced, the rest kept, so\n'
+        'naming one file refreshes that file. analyze then reports each\n'
+        'result as new, worse, baselined or changed, and exit 1 means new or\n'
+        'worse. Refuses to write when analysis is incomplete.\n\n'
+        '${buildBaselineParser().usage}\n\n'
+        'Exit codes: 0 written, 2 analysis incomplete or a file could not be\n'
+        'written, 3 usage error.',
   'deps' =>
     'Usage: $toolName deps [<file>|<dir> ...] [options]\n\n'
         'Measures the same way analyze does, then prints the dependency graph\n'
@@ -156,12 +215,15 @@ String usage([String? command]) => switch (command) {
         'cycle marked. Complete only when the whole package is in the run.\n\n'
         '${buildDepsParser().usage}\n\n$_exitCodes',
   _ =>
-    'Usage: $toolName analyze [<file>|<dir> ...] [options]\n'
-        '       $toolName stats   [<file>|<dir> ...] [options]\n'
-        '       $toolName deps    [<file>|<dir> ...] [options]\n'
+    'Usage: $toolName analyze  [<file>|<dir> ...] [options]\n'
+        '       $toolName baseline [<file>|<dir> ...] [options]\n'
+        '       $toolName stats    [<file>|<dir> ...] [options]\n'
+        '       $toolName deps     [<file>|<dir> ...] [options]\n'
         '       $toolName agent\n'
-        '       $toolName init    [options]\n\n'
-        'analyze  Measure code metrics and print one consolidated report.\n'
+        '       $toolName init     [options]\n\n'
+        'analyze  Measure code metrics and print one consolidated report,\n'
+        '         compared against the baseline when there is one.\n'
+        'baseline Record the run as the baseline analyze compares against.\n'
         'stats    Distribution, threshold shares, sweep, contributor mix and\n'
         '         sibling clusters per metric, for calibrating thresholds.\n'
         'deps     The dependency graph of the run: cycles, hubs by fan-out\n'
@@ -187,7 +249,7 @@ int runCli(
   final early = _answerWithoutAnalysis(args, out, err, runRoot);
   if (early != null) return early;
   final command = args.first;
-  if (!const {'analyze', 'stats', 'deps'}.contains(command)) {
+  if (!const {'analyze', 'stats', 'deps', 'baseline'}.contains(command)) {
     err.writeln('Unknown command `$command`.\n\n${usage()}');
     return exitUsage;
   }
@@ -201,6 +263,11 @@ int runCli(
       return 0;
     }
     cli = _overridesFor(command, parsed);
+    _insideRunRoot(
+      parsed,
+      command == 'baseline' ? 'output' : 'baseline',
+      runRoot,
+    );
   } on FormatException catch (e) {
     err.writeln('${e.message}\n\n${usage(command)}');
     return exitUsage;
@@ -217,10 +284,16 @@ int runCli(
       runRoot: runRoot,
       cli: cli,
       configPath: parsed.option('config'),
+      // Only analyze judges, so only analyze compares.
+      baselinePath: command == 'analyze' ? parsed.option('baseline') : null,
+      noBaseline: command != 'analyze' || parsed.flag('no-baseline'),
     );
   } on UsageError catch (e) {
     err.writeln(e.message);
     return exitUsage;
+  }
+  if (command == 'baseline') {
+    return _emitBaseline(parsed, result, out, err, runRoot);
   }
 
   final palette = parsed.flag('json')
@@ -310,8 +383,75 @@ int _runTextCommand(
 ArgParser _parserFor(String command) => switch (command) {
   'stats' => buildStatsParser(),
   'deps' => buildDepsParser(),
+  'baseline' => buildBaselineParser(),
   _ => buildAnalyzeParser(),
 };
+
+/// Exit 0 written, 2 when analysis was incomplete (the report is printed
+/// so the reader sees why, and nothing is written: a baseline over
+/// recovered ASTs would accept numbers that are not the code's) or a file
+/// could not be written, 3 for `--output` across several roots.
+int _emitBaseline(
+  ArgResults parsed,
+  RunResult result,
+  StringSink out,
+  StringSink err,
+  String runRoot,
+) {
+  if (result.status == RunStatus.errors) {
+    out.write(renderConsole(result));
+    err.writeln('analysis incomplete: baseline not written');
+    return RunStatus.errors.exitCode;
+  }
+  final output = parsed.option('output');
+  if (output != null && result.config.roots.length > 1) {
+    err.writeln(
+      '--output needs a single config root; this run has '
+      '${result.config.roots.length} (${(result.config.roots.keys.toList()..sort()).join(', ')})',
+    );
+    return exitUsage;
+  }
+  try {
+    final written = writeBaselines(
+      result,
+      runRoot: runRoot,
+      targets: parsed.rest,
+      outputPath: output,
+    );
+    if (written.isEmpty) {
+      out.writeln('No baseline written: no files analyzed.');
+    }
+    for (final w in written) {
+      out.writeln(
+        'wrote ${w.path}: ${_n(w.scopes, 'scope')} in ${_n(w.files, 'file')}, '
+        '${w.violations} at or above warn',
+      );
+    }
+    return 0;
+  } on FileSystemException catch (e) {
+    err.writeln(
+      'could not write ${e.path}: ${e.osError?.message ?? e.message}',
+    );
+    return RunStatus.errors.exitCode;
+  }
+}
+
+String _n(int count, String noun) => '$count $noun${count == 1 ? '' : 's'}';
+
+/// A baseline stores paths relative to itself, so a file outside the run
+/// root would hold `..` chains the run cannot resolve back. Usage error.
+void _insideRunRoot(ArgResults parsed, String option, String runRoot) {
+  if (!parsed.options.contains(option)) return;
+  final value = parsed.option(option);
+  if (value == null) return;
+  final root = p.normalize(p.absolute(runRoot));
+  final abs = p.normalize(p.isAbsolute(value) ? value : p.join(root, value));
+  if (!p.isWithin(root, abs)) {
+    throw UsageError(
+      '--$option must be inside the current directory, got `$value`',
+    );
+  }
+}
 
 /// The CLI layer of the config, after the command's own options are checked
 /// (`deps` validates its integers here so a bad one is a usage error before
@@ -321,9 +461,17 @@ CliOverrides _overridesFor(String command, ArgResults parsed) {
     _positive(parsed, 'top');
     _positive(parsed, 'depth');
   }
+  if (command == 'analyze') {
+    _positive(parsed, 'top');
+    if (parsed.option('baseline') != null && parsed.flag('no-baseline')) {
+      throw const UsageError('--baseline and --no-baseline exclude each other');
+    }
+  }
   return parseCliOverrides(
     set: parsed.multiOption('set'),
-    thresholds: parsed.multiOption('threshold'),
+    thresholds: command == 'baseline'
+        ? const []
+        : parsed.multiOption('threshold'),
     failOn: command == 'analyze' ? parsed.option('fail-on') : null,
   );
 }
@@ -387,7 +535,14 @@ int _emitReport(
       ),
     );
   } else {
-    out.write(renderConsole(result, all: parsed.flag('all'), palette: palette));
+    out.write(
+      renderConsole(
+        result,
+        all: parsed.flag('all'),
+        top: _positive(parsed, 'top'),
+        palette: palette,
+      ),
+    );
   }
   return result.exitCode;
 }

@@ -73,6 +73,21 @@ Suppressing
   A suppression on a method does not cover its closures. Suppressed scopes
   still print, so nothing is hidden.
 
+Baseline
+  When the project has a baseline file (dmetrics_baseline.json next to
+  analysis_options.yaml), every line carries its status against it:
+    fail (new)            a scope the baseline does not know: yours to fix
+    fail (worse, was 11)  a known violation that got worse: yours to fix
+    fail (baselined)      accepted debt; prints so nothing is hidden, does
+                          not fail the run, not your problem unless asked
+    warn (was 6)          moved but still under the fail line: drift
+  Exit 1 means new or worse. The `Changed since baseline` section lists
+  scopes that moved while staying ok, largest delta first: that is the
+  drift; report it, do not chase it. Never run `dmetrics baseline` to
+  make a run pass: refreshing the baseline accepts debt and is the
+  project's decision, like a threshold. Run it only when asked, or after
+  fixing violations so the file shrinks.
+
 Other commands
   dmetrics stats [paths]   Distribution, share above thresholds, a sweep
                            over candidate thresholds, contributor mix.

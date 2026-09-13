@@ -5,6 +5,8 @@
 /// layer. See SPEC.md.
 library;
 
+export 'src/baseline/baseline.dart';
+export 'src/baseline/compare.dart';
 export 'src/config/config.dart';
 export 'src/config/loader.dart';
 export 'src/config/threshold.dart';
@@ -19,6 +21,7 @@ export 'src/engine/scope.dart';
 export 'src/engine/source.dart';
 export 'src/engine/suppress.dart';
 export 'src/io/analyze_paths.dart';
+export 'src/io/baseline_files.dart';
 export 'src/io/discovery.dart';
 export 'src/metrics/cognitive/cognitive.dart';
 export 'src/metrics/coupling/coupling.dart';

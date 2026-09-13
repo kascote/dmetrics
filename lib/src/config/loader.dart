@@ -9,6 +9,7 @@
 ///   closure_rollup: separate         # run-global: separate | include_in_parent
 ///   include: [lib/**]                # per-root discovery globs; default: all
 ///   exclude: ['**.g.dart']           # per-root; default: **.g.dart, **.freezed.dart
+///   baseline: dmetrics_baseline.json # per-root; default: that name when present; none
 ///   metrics:
 ///     cyclomatic:
 ///       enabled: true
@@ -162,6 +163,11 @@ class _Parser {
       case 'exclude':
         final globs = _stringList(node, key);
         if (globs != null) return root.copyWith(exclude: globs);
+      case 'baseline':
+        final v = node is YamlScalar ? node.value : null;
+        if (v == 'none') return root.copyWith(baselineEnabled: false);
+        if (v is String && v.isNotEmpty) return root.copyWith(baseline: v);
+        problem('`$key` must be a file path or none', node);
       case 'metrics':
         return root.copyWith(metrics: _metricsMap(node, allowRunGlobal: true));
       case 'overrides':

@@ -8,6 +8,7 @@ import 'dart:convert';
 
 import 'package:source_span/source_span.dart' show FileSpan, SourceLocation;
 
+import '../baseline/compare.dart';
 import '../config/config.dart';
 import '../engine/measurement.dart';
 import '../engine/metric.dart';
@@ -62,9 +63,20 @@ Map<String, Object?> jsonReport(
       'scopes': summary.scopes,
       'verdicts': {for (final v in Verdict.values) v.name: summary.verdicts[v]},
       'suppressed': summary.suppressed,
+      if (result.baseline case final b?)
+        'baseline': {
+          'baselined': b.counts.baselined,
+          'new': b.counts.added,
+          'worse': b.counts.worse,
+          'fixed': b.counts.fixed,
+          'changed': b.counts.changed,
+          'gone': b.counts.gone,
+        },
     },
     'diagnostics': [for (final d in result.diagnostics) _runDiagnostic(d)],
-    'files': [for (final f in result.files) _file(f, contributors)],
+    'files': [
+      for (final f in result.files) _file(f, contributors, result.baseline),
+    ],
     if (result.report case Report(:final runMeasurements)
         when runMeasurements.isNotEmpty)
       'runMeasurements': [
@@ -76,6 +88,7 @@ Map<String, Object?> jsonReport(
 Map<String, Object?> _config(String root, RootConfig c, RunResult result) => {
   'root': root,
   'source': c.source,
+  if (result.baseline case final b?) 'baseline': b.byRoot[root],
   'metrics': {
     for (final m in result.metrics)
       m.id: _metricConfig(c.metrics[m.id], metric: m),
@@ -112,7 +125,11 @@ Map<String, Object?> _runDiagnostic(RunDiagnostic d) => {
   'column': d.column,
 };
 
-Map<String, Object?> _file(FileReport f, ContributorDetail detail) {
+Map<String, Object?> _file(
+  FileReport f,
+  ContributorDetail detail,
+  BaselineComparison? baseline,
+) {
   final emitted = {for (final s in f.scopes) s.id};
   return {
     'path': f.path,
@@ -126,7 +143,7 @@ Map<String, Object?> _file(FileReport f, ContributorDetail detail) {
           'span': _span(d.span),
         },
     ],
-    'scopes': [for (final s in f.scopes) _scope(s, emitted, detail)],
+    'scopes': [for (final s in f.scopes) _scope(s, emitted, detail, baseline)],
   };
 }
 
@@ -134,6 +151,7 @@ Map<String, Object?> _scope(
   ScopeResult s,
   Set<ScopeId> emitted,
   ContributorDetail detail,
+  BaselineComparison? baseline,
 ) {
   final ctx = s.scope;
   // The nearest enclosing scope that is itself in the report; structural
@@ -153,12 +171,17 @@ Map<String, Object?> _scope(
     'span': _span(ctx.span),
     'partial': ctx.partial,
     'results': {
-      for (final id in metricIds) id: _result(s.results[id]!, detail),
+      for (final id in metricIds)
+        id: _result(s.results[id]!, detail, baseline?.of(s.id, id)),
     },
   };
 }
 
-Map<String, Object?> _result(MetricResult r, ContributorDetail detail) {
+Map<String, Object?> _result(
+  MetricResult r,
+  ContributorDetail detail,
+  BaselineMatch? match,
+) {
   final m = r.measurement;
   final suppressed = r.suppressed;
   return {
@@ -177,6 +200,8 @@ Map<String, Object?> _result(MetricResult r, ContributorDetail detail) {
           },
     ..._contributors(m, detail),
     if (m.detail != null) 'detail': m.detail,
+    if (match != null)
+      'baseline': {'status': match.status.label, 'value': match.value},
   };
 }
 

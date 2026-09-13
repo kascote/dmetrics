@@ -78,20 +78,25 @@ ss.FileSpan declarationSpan(ss.SourceFile file, AstNode node) =>
     file.span(declarationBeginToken(node).offset, node.end);
 
 /// FNV-1a (32-bit) over the declaration's token lexemes, NUL-separated, as
-/// eight hex digits. Comments and whitespace do not participate.
+/// eight hex digits. Comments and whitespace do not participate, and the
+/// declaration's own name tokens hash as a placeholder, so a rename that
+/// leaves the body alone keeps the fingerprint and a baseline can follow
+/// it. Frozen: every baseline file depends on it.
 String fingerprintOf(AstNode node) {
   var hash = 0x811c9dc5;
   void mix(int byte) {
     hash = ((hash ^ byte) * 0x01000193) & 0xffffffff;
   }
 
+  final masked = _ownNameTokens(node);
   final end = node.end;
   for (
     Token? t = declarationBeginToken(node);
     t != null && t.offset < end && t.type != TokenType.EOF;
     t = t.next
   ) {
-    for (final unit in t.lexeme.codeUnits) {
+    final lexeme = masked.contains(t) ? _namePlaceholder : t.lexeme;
+    for (final unit in lexeme.codeUnits) {
       mix(unit & 0xff);
       mix(unit >> 8);
     }
@@ -99,6 +104,21 @@ String fingerprintOf(AstNode node) {
   }
   return hash.toRadixString(16).padLeft(8, '0');
 }
+
+const _namePlaceholder = '\u0001name';
+
+/// The tokens that spell the declaration's own name: a method's or
+/// function's name; a constructor's class name and name. Identity, not
+/// lexeme: a body that mentions the name still hashes it.
+Set<Token> _ownNameTokens(AstNode node) => switch (node) {
+  MethodDeclaration(:final name) => {name},
+  FunctionDeclaration(:final name) => {name},
+  ConstructorDeclaration(:final typeName, :final name) => {
+    ?typeName?.token,
+    ?name,
+  },
+  _ => const {},
+};
 
 /// Allocates ids that are unique within one file's report (§7.3).
 ///

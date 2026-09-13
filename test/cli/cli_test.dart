@@ -353,6 +353,172 @@ void main() {
     });
   });
 
+  group('baseline', () {
+    const threshold =
+        'dmetrics:\n  metrics:\n    cyclomatic: {thresholds: {warn: 2, fail: 3}}\n';
+    const worse =
+        'int f(int x) => x > 0 ? (x > 1 ? (x > 2 ? 3 : 2) : 1) : 0;\n';
+
+    test('record, then compare: exit 1 only on new or worse', () {
+      write('pubspec.yaml', 'name: x\n');
+      write('analysis_options.yaml', threshold);
+      write('lib/a.dart', fn);
+      expect(run(['analyze', 'lib']).code, 1);
+
+      final recorded = run(['baseline', 'lib']);
+      expect(recorded.code, 0, reason: recorded.err);
+      expect(
+        recorded.out,
+        'wrote dmetrics_baseline.json: 2 scopes in 1 file, 1 at or above warn\n',
+      );
+      final file = File(p.join(tmp.path, 'dmetrics_baseline.json'));
+      expect(file.existsSync(), isTrue);
+      expect(
+        file.readAsStringSync(),
+        contains('"function:f": {"fingerprint":'),
+      );
+
+      final same = run(['analyze', 'lib']);
+      expect(same.code, 0, reason: same.out);
+      expect(same.out, contains('fail (baselined)'));
+      expect(same.out, contains('baseline: 1 baselined • status: ok'));
+
+      write('lib/a.dart', worse);
+      final regressed = run(['analyze', 'lib']);
+      expect(regressed.code, 1);
+      expect(regressed.out, contains('fail (worse, was 3)'));
+      expect(
+        run(['analyze', 'lib', '--no-baseline']).out,
+        isNot(contains('was 3')),
+      );
+
+      final json = jsonDecode(run(['analyze', 'lib', '--json']).out) as Map;
+      expect((json['summary'] as Map)['baseline'], {
+        'baselined': 0,
+        'new': 0,
+        'worse': 1,
+        'fixed': 0,
+        'changed': 1, // cognitive moved too, under its floor
+        'gone': 0,
+      });
+      expect(
+        (json['configs'] as List).single['baseline'],
+        'dmetrics_baseline.json',
+      );
+      final scope = ((json['files'] as List).single['scopes'] as List)
+          .cast<Map<String, Object?>>()
+          .singleWhere((s) => s['kind'] == 'function');
+      expect(((scope['results'] as Map)['cyclomatic'] as Map)['baseline'], {
+        'status': 'worse',
+        'value': 3,
+      });
+    });
+
+    test('a single-file run refreshes that file and keeps the rest', () {
+      write('pubspec.yaml', 'name: x\n');
+      write('analysis_options.yaml', threshold);
+      write('lib/a.dart', fn);
+      write('lib/b.dart', fn.replaceFirst('f(', 'g('));
+      expect(run(['baseline']).code, 0);
+      write('lib/a.dart', worse);
+      expect(
+        run(['baseline', 'lib/a.dart']).out,
+        startsWith('wrote dmetrics_baseline.json: 2 scopes in 1 file'),
+      );
+      final text = File(p.join(tmp.path, 'dmetrics_baseline.json'))
+          .readAsStringSync();
+      expect(text, contains('"lib/b.dart"'));
+      expect(text, contains('"cyclomatic":4'));
+      expect(run(['analyze']).code, 0);
+    });
+
+    test(
+      'refuses to write on incomplete analysis; --output needs one root',
+      () {
+        write('lib/a.dart', 'int g() => 0\n');
+        final r = run(['baseline', 'lib']);
+        expect(r.code, 2);
+        expect(r.err, 'analysis incomplete: baseline not written\n');
+        expect(
+          File(p.join(tmp.path, 'dmetrics_baseline.json')).existsSync(),
+          isFalse,
+        );
+
+        write('lib/a.dart', fn);
+        write('pkg/a/pubspec.yaml', 'name: a\n');
+        write('pkg/a/lib/a.dart', fn);
+        expect(
+          run(['baseline', 'lib', 'pkg', '--output', 'b.json']).code,
+          exitUsage,
+        );
+        final one = run(['baseline', 'lib', '--output', 'out/b.json']);
+        expect(one.code, 0, reason: one.err);
+        expect(one.out, startsWith('wrote out/b.json:'));
+        expect(
+          File(p.join(tmp.path, 'out/b.json')).readAsStringSync(),
+          contains('"../lib/a.dart"'),
+        );
+        expect(
+          run([
+            'analyze',
+            'lib',
+            '--baseline',
+            'out/b.json',
+            '--threshold',
+            'cyclomatic=warn:2,fail:3',
+          ]).code,
+          0,
+        );
+        expect(
+          run(['analyze', 'lib', '--baseline', 'out/b.json', '--no-baseline'])
+              .code,
+          exitUsage,
+        );
+        // A file outside the run root cannot store paths relative to itself.
+        expect(
+          run(['baseline', 'lib', '--output', '../b.json']).code,
+          exitUsage,
+        );
+        expect(
+          run(['analyze', 'lib', '--baseline', '/tmp/b.json']).code,
+          exitUsage,
+        );
+      },
+    );
+
+    test('a configured file must exist, a stale or foreign one is exit 2, none opts out', () {
+      write('pubspec.yaml', 'name: x\n');
+      write('lib/a.dart', fn);
+      write('analysis_options.yaml', '$threshold  baseline: base.json\n');
+      final missing = run(['analyze', 'lib']);
+      expect(missing.code, 2);
+      expect(
+        missing.out,
+        startsWith('base.json • error • baseline file not found'),
+      );
+
+      write('base.json', '{"schemaVersion": 1}');
+      expect(
+        run(['analyze', 'lib']).out,
+        startsWith('base.json • error • not a baseline file'),
+      );
+
+      expect(run(['baseline', 'lib']).out, startsWith('wrote base.json:'));
+      final knobs = run([
+        'analyze',
+        'lib',
+        '--set',
+        'cyclomatic.count_case_arms=false',
+      ]);
+      expect(knobs.code, 2);
+      expect(knobs.out, contains('recorded under different settings'));
+
+      write('analysis_options.yaml', '$threshold  baseline: none\n');
+      expect(run(['analyze', 'lib']).code, 1);
+      expect(run(['analyze', 'lib']).out, isNot(contains('baseline:')));
+    });
+  });
+
   test('bin/dmetrics.dart end to end', () {
     write('lib/a.dart', fn);
     final result = Process.runSync(Platform.resolvedExecutable, [
